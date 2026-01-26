@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SelfStudyHebrew - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>SelfStudyHebrew Settings</h1>
+    </header>
+
+    <div class="info-section" style="margin-bottom: 20px;">
+      <h3>📖 Setup Guide</h3>
+      <p>New to SelfStudyHebrew? Check out our complete setup guide to get started:</p>
+      <p><a href="#" target="_blank" style="font-weight: 600;">Coming soon - Setup guide will be available here</a></p>
+    </div>
+
+    <div class="settings-section">
+      <h2>AI Integration</h2>
+
+      <div class="setting-item">
+        <label for="claude-api-key">Claude API Key</label>
+        <input type="password" id="claude-api-key" value="" placeholder="sk-ant-api03-...">
+        <p class="description">Your Anthropic Claude API key for AI-powered translations and definitions. Get one at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a></p>
+        <p class="description" style="font-weight: 600; color: #ff8c00;">⚠️ Strongly recommended: Set API spend limits at <a href="https://console.anthropic.com/settings/limits" target="_blank">console.anthropic.com/settings/limits</a> and ensure "Auto reload credits" is disabled at <a href="https://console.anthropic.com/settings/billing" target="_blank">console.anthropic.com/settings/billing</a> to avoid unexpected charges.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="max-words-i1">Max Words for i+1 Generation</label>
+        <input type="number" id="max-words-i1" value="3000" min="500" max="10000" step="500">
+        <p class="description">Total known words to send for i+1 sentence generation, split 50/50: half from most frequent words, half random sample from remaining words. Lower = cheaper API costs, higher = more sentence variety. (Default: 3000 = 1,500 frequent + 1,500 random)</p>
+        <p class="description" style="font-size: 12px; color: #888;">💡 Cost estimate at 3000 words: ~$0.05 per session (5 words), ~$17/year for daily use</p>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Card Creation Defaults</h2>
+
+      <div class="setting-item">
+        <label for="default-deck">Default Deck</label>
+        <select id="default-deck" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <option value="">None (select each time)</option>
+        </select>
+        <p class="description">Pre-select this deck when creating cards from sentences</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="default-note-type">Default Note Type</label>
+        <select id="default-note-type" style="width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px;">
+          <option value="">None (select each time)</option>
+        </select>
+        <p class="description">Pre-select this note type when creating cards from sentences</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="audio-field-name">Audio Field Name</label>
+        <input type="text" id="audio-field-name" value="Audio" placeholder="Audio">
+        <p class="description">Field name for storing subtitle audio recordings (leave empty to disable audio recording)</p>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Highlighting Options</h2>
+
+      <div class="setting-item">
+        <label for="sentence-color">i+1 Sentence Background Color</label>
+        <div class="input-group">
+          <input type="color" id="sentence-color" value="#add8e6">
+          <input type="text" id="sentence-color-text" value="#add8e6" maxlength="7">
+        </div>
+        <p class="description">Background color for sentences with exactly 1 unknown Hebrew word</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="sentence-highlight-enabled">
+          <input type="checkbox" id="sentence-highlight-enabled" checked>
+          Enable i+1 Sentence Highlighting
+        </label>
+        <p class="description">Highlight sentences that contain exactly one unknown Hebrew word (ignores non-Hebrew text)</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="strip-nikud-enabled">
+          <input type="checkbox" id="strip-nikud-enabled">
+          Strip Nikud (Vowel Marks)
+        </label>
+        <p class="description">Remove nikud (vowel marks) from Hebrew text in subtitles and overlays for reading practice</p>
+      </div>
+
+      <div class="setting-item">
+        <p class="description" style="font-style: italic; margin-top: 0;">
+          Word highlighting colors are fixed: <strong style="color: #2d5016;">Green underline</strong> for mature words (≥21 days),
+          <strong style="color: #ff8c00;">Orange underline</strong> for learning words (&lt;21 days),
+          <strong style="color: #dc3545;">Red underline</strong> for unknown words.
+        </p>
+      </div>
+
+      <div class="setting-item">
+        <label for="field-name">Anki Field Name</label>
+        <input type="text" id="field-name" value="Hebrew" placeholder="Hebrew">
+        <p class="description">The name of the field in your Anki notes containing Hebrew words</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="deck-filter">Deck Filter (Optional)</label>
+        <input type="text" id="deck-filter" value="" placeholder="e.g., Hebrew::Vocabulary">
+        <p class="description">Limit to a specific deck. Leave empty to use all decks.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="mature-threshold">Mature Threshold (Days)</label>
+        <input type="number" id="mature-threshold" value="21" min="1" max="365">
+        <p class="description">Cards with interval ≥ this value are considered "mature"</p>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Connection Status</h2>
+
+      <div class="status-box">
+        <div class="status-row">
+          <span class="status-label">AnkiConnect:</span>
+          <span id="anki-status" class="status-badge">Checking...</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Mature words:</span>
+          <span id="mature-count" style="font-weight: 600;">0</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Learning words:</span>
+          <span id="learning-count" style="font-weight: 600;">0</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Total words:</span>
+          <span id="word-count" style="font-weight: 600;">0</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Last updated:</span>
+          <span id="last-updated">Never</span>
+        </div>
+      </div>
+
+      <button id="test-connection-btn" class="btn btn-secondary">Test Connection</button>
+    </div>
+
+    <div class="settings-section">
+      <h2>Anki Setup</h2>
+      <p class="description">First time using SelfStudyHebrew? Click below to automatically create the required decks and note type in Anki.</p>
+
+      <div class="info-box" style="background: #1a1a1a; padding: 12px; border-radius: 4px; margin-bottom: 15px; border-left: 3px solid #0066ff;">
+        <strong>This will create:</strong>
+        <ul style="margin: 8px 0; padding-left: 20px;">
+          <li><strong>Already Known</strong> deck - for marking words you already know</li>
+          <li><strong>Sentence Mining</strong> deck - for storing sentences from subtitles</li>
+          <li><strong>SelfStudyHebrew</strong> note type - with fields: Hebrew, English, Notes, Audio</li>
+        </ul>
+        <p style="margin: 5px 0 0 0; color: #888; font-size: 13px;">If they already exist, they won't be modified.</p>
+      </div>
+
+      <button id="setup-anki-btn" class="btn btn-primary">
+        Setup Anki for SelfStudyHebrew
+      </button>
+      <div id="setup-status-message" style="margin-top: 12px; font-weight: 500; font-size: 14px;"></div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Actions</h2>
+
+      <div class="actions">
+        <button id="refresh-words-btn" class="btn btn-primary">
+          Refresh Word List from Anki
+        </button>
+        <button id="clear-cache-btn" class="btn btn-danger">
+          Clear Cached Words
+        </button>
+        <button id="clear-dictionary-btn" class="btn btn-danger">
+          Clear Dictionary Cache
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Custom Definitions Backup</h2>
+      <p class="description">Export your custom definitions to save them, or import previously exported definitions. This allows you to keep your custom definitions even if you remove the extension.</p>
+
+      <div class="setting-item">
+        <label for="auto-export-enabled">
+          <input type="checkbox" id="auto-export-enabled">
+          Auto-export on every change
+        </label>
+        <p class="description">Automatically export custom definitions to your Downloads folder whenever you add a new one</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="auto-export-filename">Auto-export filename</label>
+        <input type="text" id="auto-export-filename" value="selfstudyhebrew-custom-definitions.json" placeholder="selfstudyhebrew-custom-definitions.json">
+        <p class="description">Filename for auto-exported custom definitions (saved to Downloads folder). Will overwrite previous exports.</p>
+      </div>
+
+      <div class="actions">
+        <button id="export-definitions-btn" class="btn btn-secondary">
+          Export Custom Definitions
+        </button>
+        <button id="import-definitions-btn" class="btn btn-secondary">
+          Import Custom Definitions
+        </button>
+        <input type="file" id="import-definitions-file" accept=".json" style="display: none;">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Known Words Export</h2>
+      <p class="description">Export your list of known Hebrew words (Mature and Learning) to a JSON file. This can be useful for backup or analysis.</p>
+
+      <div class="actions">
+        <button id="export-words-btn" class="btn btn-secondary">
+          Export Known Words
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Bulk Import to Already Known Deck</h2>
+      <p class="description">Import a list of Hebrew words to add them all at once to the Already Known deck (as suspended cards).</p>
+
+      <div class="setting-item">
+        <label for="bulk-import-textarea">Paste words (one per line)</label>
+        <textarea id="bulk-import-textarea" rows="8" placeholder="שלום&#10;טוב&#10;ספר&#10;בית" style="width: 100%; padding: 8px; font-family: monospace; background: #1a1a1a; color: white; border: 1px solid #444; border-radius: 4px; resize: vertical;"></textarea>
+      </div>
+
+      <div class="actions" style="margin-bottom: 15px;">
+        <button id="bulk-import-text-btn" class="btn btn-primary">
+          Add Words from Text Box
+        </button>
+        <button id="clear-textarea-btn" class="btn btn-secondary">
+          Clear
+        </button>
+      </div>
+
+      <p class="description" style="text-align: center; color: #888; margin: 15px 0;">— OR —</p>
+
+      <div class="actions">
+        <button id="bulk-import-btn" class="btn btn-secondary">
+          Import from File
+        </button>
+        <input type="file" id="bulk-import-file" accept=".txt,.json" style="display: none;">
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h2>Word List</h2>
+
+      <div class="word-list-controls">
+        <input type="text" id="word-search" placeholder="Search words...">
+        <div class="filter-buttons">
+          <button id="filter-all" class="filter-btn active">All (<span id="filter-all-count">0</span>)</button>
+          <button id="filter-mature" class="filter-btn">Mature (<span id="filter-mature-count">0</span>)</button>
+          <button id="filter-learning" class="filter-btn">Learning (<span id="filter-learning-count">0</span>)</button>
+        </div>
+      </div>
+
+      <div id="word-list-container" class="word-list">
+        <p class="word-list-empty">No words loaded. Click "Refresh Word List from Anki" to load words.</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <button id="save-btn" class="btn btn-success">Save Settings</button>
+      <div id="status-message" class="status-message"></div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

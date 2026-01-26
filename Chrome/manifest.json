@@ -1,0 +1,102 @@
+{
+  "manifest_version": 3,
+  "name": "SelfStudyHebrew",
+  "version": "1.0.0",
+  "description": "Companion tool for those learning Hebrew with Anki. See your known words and mine sentences directly from your browser.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "downloads"
+  ],
+  "host_permissions": [
+    "http://localhost/*",
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "src/utils/hebrew-text.js",
+        "src/utils/formatting.js",
+        "src/utils/anki-stats.js",
+        "src/utils/constants.js",
+        "src/highlighting/word-highlighter.js",
+        "src/highlighting/sentence-highlighter.js",
+        "src/dictionary/dictionary-popup.js",
+        "src/anki/card-creator-modal.js",
+        "src/content-coordinator.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.netflix.com/*"],
+      "js": [
+        "src/utils/hebrew-text.js",
+        "src/utils/formatting.js",
+        "src/utils/anki-stats.js",
+        "src/utils/constants.js",
+        "src/subtitles/subtitle-reader-base.js",
+        "src/subtitles/netflix-reader.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://www.youtube.com/*"],
+      "js": [
+        "src/utils/hebrew-text.js",
+        "src/utils/formatting.js",
+        "src/utils/anki-stats.js",
+        "src/utils/constants.js",
+        "src/subtitles/subtitle-reader-base.js",
+        "src/subtitles/youtube-reader.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://www.streamisrael.tv/*", "*://embed.vhx.tv/*"],
+      "js": [
+        "src/utils/hebrew-text.js",
+        "src/utils/formatting.js",
+        "src/utils/anki-stats.js",
+        "src/utils/constants.js",
+        "src/highlighting/word-highlighter.js",
+        "src/highlighting/sentence-highlighter.js",
+        "src/dictionary/dictionary-popup.js",
+        "src/anki/card-creator-modal.js",
+        "src/content-coordinator.js",
+        "src/subtitles/subtitle-reader-base.js",
+        "src/subtitles/streamisrael-reader.js"
+      ],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "96": "icons/icon-96.png"
+    }
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "96": "icons/icon-96.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["dictionaries/*.json", "src/dictionary/frequency.json", "src/dictionary/binyanim.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
