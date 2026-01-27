@@ -583,7 +583,9 @@
             };
           };
 
-          window.openAnkiModal(sub.text, getWordsCallback, audioFilename);
+          // Use stripped version if nikud stripping is enabled
+          const sentenceText = window.stripNikud(sub.text, this.stripNikudEnabled);
+          window.openAnkiModal(sentenceText, getWordsCallback, audioFilename);
           return;
         }
 
