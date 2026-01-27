@@ -841,7 +841,10 @@ const MESSAGE_HANDLERS = {
         // Notify all tabs that settings have been updated
         chrome.tabs.query({}, (tabs) => {
           tabs.forEach((tab) => {
-            chrome.tabs.sendMessage(tab.id, { action: 'settingsUpdated' }).catch(() => {
+            chrome.tabs.sendMessage(tab.id, {
+              action: 'settingsUpdated',
+              settings: request.settings
+            }).catch(() => {
               // Ignore errors (tab might not have content script)
             });
           });

@@ -60,8 +60,8 @@
 
   async loadStripNikudSetting() {
     try {
-      const result = await chrome.storage.local.get(['stripNikudEnabled']);
-      this.stripNikudEnabled = result.stripNikudEnabled || false;
+      const result = await chrome.storage.local.get(['settings']);
+      this.stripNikudEnabled = result.settings?.stripNikudEnabled || false;
       console.log(`[${this.platformName} Subs] Strip nikud enabled:`, this.stripNikudEnabled);
     } catch (error) {
       console.error(`[${this.platformName} Subs] Error loading strip nikud setting:`, error);
@@ -501,11 +501,11 @@
     }
 
     // Get words and settings for i+1 detection
-    const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'sentenceHighlightEnabled', 'sentenceColor']);
+    const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'settings']);
     const matureWords = storage.matureWords || [];
     const learningWords = storage.learningWords || [];
-    const sentenceHighlightEnabled = storage.sentenceHighlightEnabled !== false;
-    const sentenceColor = storage.sentenceColor || '#add8e6';
+    const sentenceHighlightEnabled = storage.settings?.sentenceHighlightEnabled !== false;
+    const sentenceColor = storage.settings?.sentenceColor || '#add8e6';
 
     container.innerHTML = '';
 

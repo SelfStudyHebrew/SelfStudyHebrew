@@ -679,11 +679,11 @@ if (document.readyState === 'loading') {
         console.log(`[Coordinator] Clearing and populating container with ${data.subtitles.length} items`);
         container.innerHTML = '';
 
-        const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'sentenceHighlightEnabled', 'sentenceColor']);
+        const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'settings']);
         const matureWordsLocal = storage.matureWords || [];
         const learningWordsLocal = storage.learningWords || [];
-        const sentenceHighlightEnabledLocal = storage.sentenceHighlightEnabled !== false;
-        const sentenceColorLocal = storage.sentenceColor || '#add8e6';
+        const sentenceHighlightEnabledLocal = storage.settings?.sentenceHighlightEnabled !== false;
+        const sentenceColorLocal = storage.settings?.sentenceColor || '#add8e6';
 
         data.subtitles.forEach((sub) => {
           const item = document.createElement('div');
