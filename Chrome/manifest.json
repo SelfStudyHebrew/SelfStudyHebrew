@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "SelfStudyHebrew",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Companion tool for those learning Hebrew with Anki. See your known words and mine sentences directly from your browser.",
   "permissions": [
     "storage",
