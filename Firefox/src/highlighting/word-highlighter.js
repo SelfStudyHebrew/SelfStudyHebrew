@@ -122,6 +122,8 @@
       span.style.color = 'inherit'; // Inherit color from parent (important for subtitle overlays)
       span.style.textDecorationColor = UNDERLINE_COLORS[match.type];
       span.style.textDecorationThickness = '2px';
+      span.style.cursor = 'pointer'; // Show pointer cursor to indicate interactivity
+      span.style.display = 'inline'; // Ensure proper inline behavior
       span.textContent = match.word;
       span.title = WORD_TITLES[match.type];
       fragment.appendChild(span);

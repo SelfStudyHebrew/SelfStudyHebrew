@@ -6,6 +6,7 @@
   // Module state
 let dictionaryPopup = null;
 let currentPopupWord = null;
+let isPopupVisible = false;
 let frequencyData = null;
 let binyanimData = null;
 
@@ -131,11 +132,18 @@ function createDictionaryPopup() {
 
   // Add hover listeners to keep popup visible
   popup.addEventListener('mouseenter', () => {
-    // Keep popup visible when hovering over it
+    // Clear any pending hide timeout when hovering over popup
+    if (wordHideTimeout) {
+      clearTimeout(wordHideTimeout);
+      wordHideTimeout = null;
+    }
   });
 
   popup.addEventListener('mouseleave', () => {
-    hideDictionaryPopup();
+    // Delay hiding to allow user to move mouse back
+    wordHideTimeout = setTimeout(() => {
+      hideDictionaryPopup();
+    }, 300);
   });
 
   document.body.appendChild(popup);
@@ -151,8 +159,22 @@ function createDictionaryPopup() {
  * @param {Function} refreshWordsCallback - Callback to refresh word highlighting
  */
 async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
-  const popup = createDictionaryPopup();
+  // Prevent showing if already visible for this word
+  if (isPopupVisible && currentPopupWord === word) {
+    return;
+  }
+
+  // Set current word immediately to prevent duplicate calls
   currentPopupWord = word;
+  isPopupVisible = true;
+
+  // Clear any pending hide timeout
+  if (wordHideTimeout) {
+    clearTimeout(wordHideTimeout);
+    wordHideTimeout = null;
+  }
+
+  const popup = createDictionaryPopup();
 
   // Load frequency and binyanim data if not already loaded
   await loadFrequencyData();
@@ -179,11 +201,12 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
   }
 
   // Vertical positioning - if not enough space below, position above
+  // Use larger offset to prevent covering the word that triggered the popup
   if (spaceBelow < estimatedPopupHeight + 40) {
-    popup.style.top = (y - estimatedPopupHeight) + 'px';
+    popup.style.top = (y - estimatedPopupHeight - 10) + 'px';
     popup.style.bottom = 'auto';
   } else {
-    popup.style.top = (y + 20) + 'px';
+    popup.style.top = (y + 35) + 'px';
     popup.style.bottom = 'auto';
   }
 
@@ -753,7 +776,11 @@ function hideDictionaryPopup() {
     dictionaryPopup.style.display = 'none';
   }
   currentPopupWord = null;
+  isPopupVisible = false;
 }
+
+// Track hide timeout globally
+let wordHideTimeout = null;
 
 /**
  * Add dictionary hover listeners to Hebrew word highlights
@@ -767,8 +794,9 @@ function addDictionaryHoverListeners(refreshWordsCallback) {
     if (wordSpan.dataset.dictionaryListener) return;
     wordSpan.dataset.dictionaryListener = 'true';
 
-    wordSpan.addEventListener('mousemove', (e) => {
-      if (e.shiftKey && (!dictionaryPopup || dictionaryPopup.style.display === 'none')) {
+    wordSpan.addEventListener('mouseenter', (e) => {
+      // Show popup immediately if shift is held
+      if (e.shiftKey) {
         const word = wordSpan.textContent.trim();
         if (word) {
           showDictionaryPopup(word, e.pageX, e.pageY, refreshWordsCallback);
@@ -776,14 +804,30 @@ function addDictionaryHoverListeners(refreshWordsCallback) {
       }
     });
 
-    wordSpan.addEventListener('mouseleave', () => {
-      // Delay hiding to allow mouse to move to popup
-      setTimeout(() => {
+    wordSpan.addEventListener('mousemove', (e) => {
+      // Check on mousemove in case user presses shift while already hovering
+      if (e.shiftKey) {
+        const word = wordSpan.textContent.trim();
+        if (word) {
+          showDictionaryPopup(word, e.pageX, e.pageY, refreshWordsCallback);
+        }
+      }
+    });
+
+    wordSpan.addEventListener('mouseleave', (e) => {
+      // Don't hide if shift is still held (user is moving between words)
+      if (e.shiftKey) {
+        return;
+      }
+
+      // Longer delay to give user time to read or move mouse to popup
+      wordHideTimeout = setTimeout(() => {
         // Only hide if mouse isn't over the popup
         if (!dictionaryPopup || !dictionaryPopup.matches(':hover')) {
           hideDictionaryPopup();
         }
-      }, 100);
+        wordHideTimeout = null;
+      }, 500);
     });
   });
 }
@@ -817,6 +861,18 @@ function initializeDictionaryFeature(refreshWordsCallback) {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       hideDictionaryPopup();
+    }
+  });
+
+  // Hide popup when shift is released (unless hovering over popup itself)
+  document.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift') {
+      // Small delay to allow moving to popup
+      setTimeout(() => {
+        if (!dictionaryPopup || !dictionaryPopup.matches(':hover')) {
+          hideDictionaryPopup();
+        }
+      }, 100);
     }
   });
 }
