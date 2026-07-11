@@ -662,11 +662,24 @@ function displayResults(data, sessionCost, totalSpend) {
       font-size: 13px;
     `;
 
-    const sessionEl = document.createElement('span');
-    sessionEl.innerHTML = `<span style="color:#8f8fa8">This session:</span> <span style="color:#ededf5;font-weight:600">${formatCost(sessionCost)}</span>`;
+    function makeLabeledSpan(label, value, valueColor) {
+        const container = document.createElement('span');
 
-    const totalEl = document.createElement('span');
-    totalEl.innerHTML = `<span style="color:#8f8fa8">All-time total:</span> <span style="color:#5a7fff;font-weight:600">${formatCost(totalSpend)}</span>`;
+        const labelSpan = document.createElement('span');
+        labelSpan.style.color = '#8f8fa8';
+        labelSpan.textContent = label;
+
+        const valueSpan = document.createElement('span');
+        valueSpan.style.color = valueColor;
+        valueSpan.style.fontWeight = '600';
+        valueSpan.textContent = value;
+
+        container.append(labelSpan, document.createTextNode(' '), valueSpan);
+        return container;
+    }
+
+    const sessionEl = makeLabeledSpan('This session:', formatCost(sessionCost), '#ededf5');
+    const totalEl = makeLabeledSpan('All-time total:', formatCost(totalSpend), '#5a7fff');
 
     banner.appendChild(sessionEl);
     banner.appendChild(totalEl);
