@@ -604,8 +604,15 @@
             const isHebrewAlreadySelected = currentTrack &&
               (currentTrack.displayName === hebrewTrack.displayName || currentTrack.bcp47 === hebrewTrack.bcp47);
 
-            if (!isHebrewAlreadySelected) {
-              const offTrack = tracks.find(t => t.displayName === 'Off');
+            const offTrack = tracks.find(t => t.displayName === 'Off');
+
+            if (isHebrewAlreadySelected) {
+              // Hebrew already active but TTML was fetched before our interceptor — cycle off→on to re-fetch
+              if (offTrack) {
+                player.setTimedTextTrack(offTrack);
+                setTimeout(() => player.setTimedTextTrack(hebrewTrack), 300);
+              }
+            } else {
               if (offTrack) {
                 player.setTimedTextTrack(offTrack);
                 setTimeout(() => player.setTimedTextTrack(hebrewTrack), 200);
@@ -771,15 +778,21 @@
 
 // Re-initialize on SPA navigation
 let lastUrl = location.href;
+let currentNetflixReader = null;
 new MutationObserver(() => {
   const url = location.href;
   if (url !== lastUrl) {
     lastUrl = url;
     if (url.includes('netflix.com/watch/')) {
       console.log('[Netflix Subs] SPA navigation detected, reinitializing');
+      // Clean up previous reader before creating a new one
+      if (currentNetflixReader) {
+        try { currentNetflixReader.cleanup(); } catch (e) {}
+        currentNetflixReader = null;
+      }
       setTimeout(() => {
-        const reader = new window.NetflixSubtitleReader();
-        reader.initialize('he').catch(error => {
+        currentNetflixReader = new window.NetflixSubtitleReader();
+        currentNetflixReader.initialize('he').catch(error => {
           console.error('[Netflix Subs] Reinitialization error:', error);
         });
       }, 2000);

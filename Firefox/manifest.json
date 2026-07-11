@@ -64,7 +64,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["*://www.streamisrael.tv/*", "*://embed.vhx.tv/*"],
+      "matches": ["*://*.streamisrael.tv/*", "*://streamisrael.tv/*", "*://embed.vhx.tv/*"],
       "js": [
         "src/utils/hebrew-text.js",
         "src/utils/formatting.js",

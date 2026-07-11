@@ -1,8 +1,56 @@
 // Options page script for SelfStudyHebrew
 
+const DEFAULT_SENTENCE_PROMPT = `TARGET WORD (unknown to student): {{TARGET_WORD}}
+
+Generate {{COUNT}} natural Hebrew sentences following these rules:
+
+1. Each sentence MUST contain the exact target word "{{TARGET_WORD}}" with no modifications (No added prefixes/prepositions)
+2. All other words MUST come from the known words list only
+3. You MAY add prefixes/prepositions to known words when grammatically necessary, but not the target word as this should not be modified. For example, if the target word is בר then you should NOT change it to לבר or הבר or ובר
+4. Sentences must be natural, grammatically correct Hebrew that native speakers would use
+5. Vary sentence structure, context, and length
+6. Keep sentences simple but meaningful
+
+CRITICAL CONSTRAINTS:
+- Do NOT use any words outside the known words list (except the target word)
+- Do NOT modify the target word itself (no prefixes/suffixes unless the word already has them)
+- Do NOT add explanations, translations, or numbering
+
+OUTPUT FORMAT: Return ONLY {{COUNT}} Hebrew sentences, one per line, nothing else.`;
+
+const DEFAULT_DEFINE_PROMPT = `Hebrew sentence: {{SENTENCE}}
+
+Define the word "{{WORD}}" as it appears in that sentence.
+
+Use exactly this HTML format — bold each label, each entry on its own line with no blank lines:
+
+<b>TYPE:</b> [part of speech — Verb / Noun / Adjective / Adverb / Preposition / Conjunction / Pronoun / Particle / etc.]
+<b>ROOT:</b> [Hebrew root letters separated by dashes, e.g. פ - ת - ח]
+<b>MEANING:</b> [core meaning(s), including all persons/genders/numbers the form covers where relevant, e.g. "is opened / has been opened"]
+
+If the word is a verb, add these two lines immediately after MEANING:
+<b>TENSE:</b> [Present / Past / Future / Imperative, plus person/gender/number where applicable]
+<b>INFINITIVE:</b> [infinitive form in Hebrew followed by its English meaning in parentheses, e.g. להיפתח (To Be Opened)]
+
+Then always end with:
+<b>CONTEXT:</b> [what the word means specifically in this sentence — emotional, literal, idiomatic, etc.]
+
+If context alone cannot disambiguate between multiple distinct meanings, list each possibility under MEANING before giving the best-guess CONTEXT.
+Output only the formatted definition — no preamble, no explanation.`;
+
 // DOM elements
 const claudeApiKeyInput = document.getElementById('claude-api-key');
+const claudeModelInput = document.getElementById('claude-model');
+const elevenLabsApiKeyInput = document.getElementById('elevenlabs-api-key');
+const elevenLabsVoiceIdInput = document.getElementById('elevenlabs-voice-id');
+const elevenLabsModelInput = document.getElementById('elevenlabs-model');
 const maxWordsI1Input = document.getElementById('max-words-i1');
+const sentenceGenerationPromptInput = document.getElementById('sentence-generation-prompt');
+const resetPromptBtn = document.getElementById('reset-prompt-btn');
+const aiDefinePromptInput = document.getElementById('ai-define-prompt');
+const resetDefinePromptBtn = document.getElementById('reset-define-prompt-btn');
+const spendTotal = document.getElementById('spend-total');
+const resetSpendBtn = document.getElementById('reset-spend-btn');
 const defaultDeckSelect = document.getElementById('default-deck');
 const defaultNoteTypeSelect = document.getElementById('default-note-type');
 const audioFieldNameInput = document.getElementById('audio-field-name');
@@ -196,9 +244,15 @@ async function loadSettings() {
 
     if (settings) {
       claudeApiKeyInput.value = settings.claudeApiKey || '';
+      claudeModelInput.value = settings.claudeModel || 'claude-sonnet-4-6';
+      elevenLabsApiKeyInput.value = settings.elevenLabsApiKey || '';
+      elevenLabsVoiceIdInput.value = settings.elevenLabsVoiceId || 'Jrq4GqCKqYpigdQsZRkP';
+      elevenLabsModelInput.value = settings.elevenLabsModel || 'eleven_v3';
       maxWordsI1Input.value = settings.maxWordsForI1 || 3000;
-      sentenceColorInput.value = settings.sentenceColor || '#add8e6';
-      sentenceColorText.value = settings.sentenceColor || '#add8e6';
+      sentenceGenerationPromptInput.value = settings.sentenceGenerationPrompt || DEFAULT_SENTENCE_PROMPT;
+      aiDefinePromptInput.value = settings.aiDefinePrompt || DEFAULT_DEFINE_PROMPT;
+      sentenceColorInput.value = settings.sentenceColor || '#5a7fff';
+      sentenceColorText.value = settings.sentenceColor || '#5a7fff';
       sentenceHighlightEnabled.checked = settings.sentenceHighlightEnabled !== false;
       stripNikudEnabled.checked = settings.stripNikudEnabled || false;
       autoExportEnabled.checked = settings.autoExportEnabled || false;
@@ -291,7 +345,7 @@ async function saveSettings() {
     // Validate sentence color
     const sentenceColor = sentenceColorText.value;
     if (!/^#[0-9A-F]{6}$/i.test(sentenceColor)) {
-      showStatus('Invalid color format. Use hex format like #add8e6', true);
+      showStatus('Invalid color format. Use hex format like #5a7fff', true);
       return;
     }
 
@@ -305,7 +359,13 @@ async function saveSettings() {
     const oldThreshold = settings.matureThreshold;
 
     settings.claudeApiKey = claudeApiKeyInput.value.trim();
+    settings.claudeModel = claudeModelInput.value.trim() || 'claude-sonnet-4-6';
+    settings.elevenLabsApiKey = elevenLabsApiKeyInput.value.trim();
+    settings.elevenLabsVoiceId = elevenLabsVoiceIdInput.value.trim() || 'Jrq4GqCKqYpigdQsZRkP';
+    settings.elevenLabsModel = elevenLabsModelInput.value.trim() || 'eleven_v3';
     settings.maxWordsForI1 = parseInt(maxWordsI1Input.value) || 3000;
+    settings.sentenceGenerationPrompt = sentenceGenerationPromptInput.value.trim() || DEFAULT_SENTENCE_PROMPT;
+    settings.aiDefinePrompt = aiDefinePromptInput.value.trim() || DEFAULT_DEFINE_PROMPT;
     settings.defaultDeck = defaultDeckSelect.value;
     settings.defaultNoteType = defaultNoteTypeSelect.value;
     settings.audioFieldName = audioFieldNameInput.value.trim() || 'Audio';
@@ -813,6 +873,14 @@ importDefinitionsFile.addEventListener('change', (e) => {
 });
 saveBtn.addEventListener('click', saveSettings);
 
+resetPromptBtn.addEventListener('click', () => {
+  sentenceGenerationPromptInput.value = DEFAULT_SENTENCE_PROMPT;
+});
+
+resetDefinePromptBtn.addEventListener('click', () => {
+  aiDefinePromptInput.value = DEFAULT_DEFINE_PROMPT;
+});
+
 // Allow saving with Enter key in text fields
 [claudeApiKeyInput, fieldNameInput, deckFilterInput, sentenceColorText, matureThresholdInput].forEach(input => {
   input.addEventListener('keypress', (e) => {
@@ -822,5 +890,27 @@ saveBtn.addEventListener('click', saveSettings);
   });
 });
 
+// Load and display Claude spend total
+async function loadSpendTotal() {
+  const data = await chrome.storage.local.get('claudeSpendTotal');
+  const total = data.claudeSpendTotal || 0;
+  spendTotal.textContent = total < 0.0001 && total > 0 ? '<$0.0001' : `$${total.toFixed(4)}`;
+}
+
+resetSpendBtn.addEventListener('click', async () => {
+  if (!confirm('Reset the Claude API spend total to $0.00?')) return;
+  await chrome.storage.local.set({ claudeSpendTotal: 0 });
+  loadSpendTotal();
+});
+
+// Keep spend total live — update whenever background writes a new value
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.claudeSpendTotal) {
+    const total = changes.claudeSpendTotal.newValue || 0;
+    spendTotal.textContent = total < 0.0001 && total > 0 ? '<$0.0001' : `$${total.toFixed(4)}`;
+  }
+});
+
 // Load settings on page load
 loadSettings();
+loadSpendTotal();

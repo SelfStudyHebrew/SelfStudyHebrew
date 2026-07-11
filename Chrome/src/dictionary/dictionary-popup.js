@@ -116,18 +116,21 @@ function createDictionaryPopup() {
     display: none;
     position: absolute;
     z-index: 2147483647;
-    background: #272727;
-    color: white;
-    border: 2px solid #333;
-    border-radius: 8px;
-    padding: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-    max-width: 400px;
-    max-height: 300px;
+    background: #13131a;
+    color: #ededf5;
+    border: 1px solid #2c2c3e;
+    border-radius: 14px;
+    padding: 0;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.05);
+    max-width: 360px;
+    max-height: 520px;
     overflow-y: auto;
+    overflow-x: hidden;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
+    font-size: 13.5px;
+    line-height: 1.55;
+    scrollbar-width: thin;
+    scrollbar-color: #2c2c3e transparent;
   `;
 
   // Add hover listeners to keep popup visible
@@ -181,7 +184,7 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
   await loadBinyanimData();
 
   // Show loading state
-  popup.innerHTML = '<div style="color: #aaa;">Loading...</div>';
+  popup.innerHTML = '<div style="padding:16px 18px;color:#5a5a72;font-size:13px;">Looking up...</div>';
   popup.style.display = 'block';
 
   // Smart positioning: check viewport boundaries
@@ -224,212 +227,164 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
     const isPhrase = word.trim().split(/\s+/).length > 1;
 
     const escapedWord = escapeHtml(word);
-    let html = `<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-      <div>
-        ${isPhrase ? '<div style="font-size: 11px; color: #888; margin-bottom: 2px;">Phrase</div>' : ''}
-        <div style="font-weight: 600; color: #0066ff; font-size: 16px; direction: rtl;">${escapedWord}</div>
-      </div>
-      <button id="play-pronunciation-btn" title="Play pronunciation" style="
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 20px;
-        padding: 0;
-        margin-left: 8px;
-      ">🔊</button>
-    </div>`;
 
-    // Add frequency information (only for single words)
+    // ── shared style tokens ───────────────────────────────
+    const S = {
+      surface2:  '#1a1a24',
+      surface3:  '#21212e',
+      border:    '#2c2c3e',
+      accent:    '#5a7fff',
+      accentDim: 'rgba(90,127,255,0.10)',
+      text:      '#ededf5',
+      muted:     '#8f8fa8',
+      dimmer:    '#5a5a72',
+      success:   '#34d399',
+      successBg: 'rgba(52,211,153,0.10)',
+      successBdr:'rgba(52,211,153,0.28)',
+      info:      '#38bdf8',
+      infoBg:    'rgba(56,189,248,0.10)',
+      infoBdr:   'rgba(56,189,248,0.28)',
+      btnBase:   `padding:7px 12px;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;border:1px solid #2c2c3e;display:flex;align-items:center;justify-content:center;transition:all 0.15s ease;`,
+    };
+
+    // ── header ────────────────────────────────────────────
+    let html = `
+      <div style="
+        padding: 14px 16px 12px;
+        border-bottom: 1px solid ${S.border};
+        position: relative;
+      ">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,${S.accent},#9b6bff 60%,transparent);border-radius:14px 14px 0 0;"></div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;">
+          <div style="flex:1;min-width:0;">
+            ${isPhrase ? `<div style="font-size:10px;font-weight:600;letter-spacing:0.5px;color:${S.accent};text-transform:uppercase;margin-bottom:4px;">Phrase</div>` : ''}
+            <div style="font-weight:700;color:${S.text};font-size:20px;direction:rtl;line-height:1.3;word-break:break-word;">${escapedWord}</div>
+          </div>
+          <button id="play-pronunciation-btn" title="Play pronunciation" style="
+            background:${S.surface2};
+            border:1px solid ${S.border};
+            border-radius:8px;
+            cursor:pointer;
+            font-size:15px;
+            padding:6px 8px;
+            flex-shrink:0;
+            margin-top:2px;
+            line-height:1;
+            transition:all 0.15s ease;
+          ">🔊</button>
+        </div>`;
+
+    // frequency badge
     if (!isPhrase) {
       const freqInfo = getFrequencyInfo(word);
       if (freqInfo) {
-        const color = freqInfo.percentile <= 10 ? '#28a745' : freqInfo.percentile <= 25 ? '#17a2b8' : '#6c757d';
-        html += `<div style="font-size: 11px; background: ${color}; color: white; padding: 3px 8px; border-radius: 3px; margin-bottom: 8px; display: inline-block;">
-          📊 ${freqInfo.label} (Rank #${freqInfo.rank.toLocaleString()})
+        const isCommon = freqInfo.percentile <= 10;
+        const isMid    = freqInfo.percentile <= 25;
+        const bg  = isCommon ? S.successBg  : isMid ? S.infoBg  : 'rgba(255,255,255,0.06)';
+        const bdr = isCommon ? S.successBdr : isMid ? S.infoBdr : 'rgba(255,255,255,0.12)';
+        const clr = isCommon ? S.success    : isMid ? S.info    : S.muted;
+        html += `<div style="margin-top:8px;">
+          <span style="font-size:10.5px;font-weight:600;background:${bg};color:${clr};border:1px solid ${bdr};padding:2px 9px;border-radius:20px;display:inline-block;letter-spacing:0.2px;">
+            ${freqInfo.label} · #${freqInfo.rank.toLocaleString()}
+          </span>
         </div>`;
       }
     }
 
-    // Add binyanim/conjugation information (only for single words)
+    html += `</div>`; // end header
+
+    // ── body ─────────────────────────────────────────────
+    html += `<div style="padding:12px 16px;">`;
+
+    // verb info card
     const verbInfo = !isPhrase ? findVerbInfo(word) : null;
     if (verbInfo) {
-      html += `<div style="font-size: 12px; background: #1a1a1a; padding: 8px; border-radius: 4px; margin-bottom: 10px; border-left: 3px solid #17a2b8;">
-        <div style="margin-bottom: 4px;">
-          <span style="font-weight: 600; color: #17a2b8;">Verb:</span>
-          <span style="direction: rtl; font-weight: 600; margin-left: 6px;">${escapeHtml(verbInfo.infinitive.hebrew)}</span>
+      html += `
+        <div style="background:${S.surface2};border:1px solid ${S.border};border-left:3px solid ${S.info};border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+          <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${S.info};margin-bottom:6px;">Verb</div>
+          <div style="font-size:17px;font-weight:700;direction:rtl;color:${S.text};margin-bottom:3px;">${escapeHtml(verbInfo.infinitive.hebrew)}</div>
+          ${verbInfo.infinitive.transliteration ? `<div style="color:${S.muted};font-size:11.5px;font-style:italic;margin-bottom:2px;">${escapeHtml(verbInfo.infinitive.transliteration)}</div>` : ''}
+          ${verbInfo.infinitive.english ? `<div style="color:${S.muted};font-size:12.5px;margin-bottom:7px;">${escapeHtml(verbInfo.infinitive.english)}</div>` : ''}
+          <a href="${escapeHtml(verbInfo.url)}" target="_blank" style="color:${S.accent};text-decoration:none;font-size:11.5px;font-weight:500;">Full conjugation on Pealim →</a>
         </div>`;
-
-      // Add transliteration if available
-      if (verbInfo.infinitive.transliteration) {
-        html += `<div style="color: #aaa; font-size: 11px; font-style: italic; margin-bottom: 2px;">${escapeHtml(verbInfo.infinitive.transliteration)}</div>`;
-      }
-
-      // Add English meaning if available
-      if (verbInfo.infinitive.english) {
-        html += `<div style="color: #ccc; margin-bottom: 6px;">${escapeHtml(verbInfo.infinitive.english)}</div>`;
-      }
-
-      html += `<a href="${escapeHtml(verbInfo.url)}" target="_blank" style="color: #0066ff; text-decoration: none; font-size: 11px;">
-          View full conjugation on Pealim →
-        </a>
-      </div>`;
     }
 
+    // definitions
     if (response.success && response.results.length > 0) {
       response.results.forEach((result) => {
-        if (result.definitions && result.definitions.length > 0) {
-          // Show source label
-          const sourceLabel = result.source === 'custom' ?
-            '<span style="font-size: 11px; background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; margin-bottom: 4px; display: inline-block;">MY DEFINITIONS</span>' : '';
+        if (!result.definitions || result.definitions.length === 0) return;
 
-          if (sourceLabel) html += sourceLabel;
-
-          result.definitions.forEach((def) => {
-            html += `<div style="margin-bottom: 6px;">
-              ${result.source === 'custom' ? '★' : '▪'} ${escapeHtml(def)}
-            </div>`;
-          });
+        if (result.source === 'custom') {
+          html += `<div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${S.success};margin-bottom:6px;">My Definitions</div>`;
         }
+
+        result.definitions.forEach((def) => {
+          const isCustom = result.source === 'custom';
+          html += `
+            <div style="
+              padding:7px 10px;
+              margin-bottom:5px;
+              background:${isCustom ? S.successBg : S.surface2};
+              border:1px solid ${isCustom ? S.successBdr : S.border};
+              border-radius:6px;
+              font-size:13px;
+              color:${S.text};
+              line-height:1.5;
+            ">${escapeHtml(def)}</div>`;
+        });
       });
     } else {
-      html += `<div style="color: #aaa; margin-bottom: 10px;">No definitions found</div>`;
+      html += `<div style="color:${S.dimmer};font-size:13px;padding:4px 0 8px;">No definitions found</div>`;
     }
 
-    // Add translation/external search section
+    // ── lookup tools ──────────────────────────────────────
     html += `
-      <div id="translate-section" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #444;">
-        <button id="translate-btn" style="
-          width: 100%;
-          padding: 8px;
-          background: #4285f4;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-          margin-bottom: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">Google Translate</button>
-        <div id="translate-result" style="display: none; padding: 8px; background: #1a1a1a; border-radius: 4px; font-size: 13px; color: white; margin-bottom: 8px;"></div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid ${S.border};">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${S.accent};margin-bottom:8px;">Look up</div>
+        <button id="translate-btn" style="${S.btnBase}width:100%;background:${S.surface3};color:${S.text};border-color:#3a3a52;margin-bottom:6px;">Google Translate</button>
+        <div id="translate-result" style="display:none;padding:8px 10px;background:${S.surface2};border:1px solid ${S.border};border-radius:6px;font-size:12.5px;color:${S.text};margin-bottom:6px;line-height:1.5;"></div>
 
-        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
-          <button id="reverso-btn" style="
-            flex: 1;
-            padding: 8px;
-            background: #4285f4;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          ">Reverso</button>
-
-          <button id="pealim-btn" style="
-            flex: 1;
-            padding: 8px;
-            background: #4285f4;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          ">Pealim</button>
+        <div style="display:flex;gap:6px;margin-bottom:6px;">
+          <button id="reverso-btn" style="${S.btnBase}flex:1;background:${S.surface3};color:${S.text};border-color:#3a3a52;">Reverso</button>
+          <button id="pealim-btn" style="${S.btnBase}flex:1;background:${S.surface3};color:${S.text};border-color:#3a3a52;">Pealim</button>
         </div>
-
-        <div id="reverso-result" style="display: none; padding: 8px; background: #1a1a1a; border-radius: 4px; font-size: 13px; color: white; margin-bottom: 8px; border-left: 3px solid #4285f4;"></div>
-        <div id="pealim-result" style="display: none; padding: 8px; background: #1a1a1a; border-radius: 4px; font-size: 13px; color: white; margin-bottom: 8px; border-left: 3px solid #4285f4;"></div>
+        <div id="reverso-result" style="display:none;padding:8px 10px;background:${S.surface2};border:1px solid ${S.border};border-left:3px solid ${S.accent};border-radius:6px;font-size:12.5px;color:${S.text};margin-bottom:6px;line-height:1.5;"></div>
+        <div id="pealim-result"  style="display:none;padding:8px 10px;background:${S.surface2};border:1px solid ${S.border};border-left:3px solid ${S.accent};border-radius:6px;font-size:12.5px;color:${S.text};margin-bottom:6px;line-height:1.5;"></div>
       </div>
     `;
 
-    // Add "Create Anki Card" button (for both words and phrases)
+    // ── actions ───────────────────────────────────────────
     html += `
-      <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #444;">
-        <button id="create-card-btn" style="
-          width: 100%;
-          padding: 8px;
-          background: #0066ff;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-          margin-bottom: 8px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">Create Anki Card</button>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid ${S.border};display:flex;flex-direction:column;gap:6px;">
+        <button id="create-card-btn" style="${S.btnBase}width:100%;background:${S.accent};color:white;border-color:transparent;font-size:13px;font-weight:600;padding:9px 12px;box-shadow:0 2px 8px rgba(90,127,255,0.28);">
+          Create Anki Card
+        </button>
+        ${!isPhrase ? `<button id="mark-known-btn" style="${S.btnBase}width:100%;background:${S.surface3};color:${S.text};border-color:#3a3a52;font-size:12.5px;">Mark as Already Known</button>` : ''}
       </div>
     `;
 
-    // Add "Already Known" button (only for single words)
-    // Note: isPhrase already declared above
-    if (!isPhrase) {
-      html += `
-        <div style="margin-top: 0;">
-          <button id="mark-known-btn" style="
-            width: 100%;
-            padding: 8px;
-            background: #555;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          ">Mark as Already Known</button>
-        </div>
-      `;
-    }
-
-    // Add custom definition input
+    // ── custom definition ─────────────────────────────────
     html += `
-      <style>
-        #custom-def-input::placeholder {
-          color: #666;
-        }
-      </style>
-      <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #444;">
-        <input type="text" id="custom-def-input" placeholder="Add your own definition..." style="
-          width: 100%;
-          padding: 8px;
-          border: 1px solid #444;
-          border-radius: 4px;
-          font-size: 13px;
-          margin-bottom: 8px;
-          color: white;
-          background: #1a1a1a;
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid ${S.border};">
+        <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:${S.accent};margin-bottom:7px;">Add definition</div>
+        <input type="text" id="custom-def-input" placeholder="Your own definition..." style="
+          width:100%;
+          padding:7px 10px;
+          border:1px solid ${S.border};
+          border-radius:6px;
+          font-size:13px;
+          margin-bottom:6px;
+          color:${S.text};
+          background:${S.surface2};
+          outline:none;
+          box-sizing:border-box;
+          font-family:inherit;
         ">
-        <button id="add-custom-def-btn" style="
-          width: 100%;
-          padding: 8px;
-          background: #0066ff;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 13px;
-          font-weight: 500;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        ">Add Definition</button>
+        <button id="add-custom-def-btn" style="${S.btnBase}width:100%;background:${S.surface3};color:${S.text};border-color:#3a3a52;">Add Definition</button>
       </div>
     `;
+
+    html += `</div>`; // end body
 
     // Use DOMParser to safely parse HTML with escaped content
     const parser = new DOMParser();
@@ -442,29 +397,74 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
     // Add event listener for pronunciation playback button
     const playBtn = document.getElementById('play-pronunciation-btn');
     if (playBtn) {
-      playBtn.addEventListener('click', () => {
-        playBtn.style.opacity = '0.5';
+      const resetPlayBtn = () => {
+        playBtn.textContent = '🔊';
+        playBtn.style.background = S.surface2;
+        playBtn.style.borderColor = S.border;
+        playBtn.style.color = '';
+        playBtn.disabled = false;
+      };
 
-        // Use Web Speech API (built into browser)
-        if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(word);
-          utterance.lang = 'he-IL'; // Hebrew (Israel)
-          utterance.rate = 0.9; // Slightly slower for clarity
+      const setPlaying = () => {
+        playBtn.disabled = true;
+        playBtn.textContent = '▶';
+        playBtn.style.background = S.accentDim;
+        playBtn.style.borderColor = S.accent;
+        playBtn.style.color = S.accent;
+      };
 
-          utterance.onend = () => {
-            playBtn.style.opacity = '1';
-          };
+      const setDone = () => {
+        playBtn.textContent = '✓';
+        playBtn.style.background = S.successBg;
+        playBtn.style.borderColor = S.successBdr;
+        playBtn.style.color = S.success;
+        setTimeout(resetPlayBtn, 1200);
+      };
 
-          utterance.onerror = (error) => {
-            console.error('Speech synthesis error:', error);
-            playBtn.style.opacity = '1';
-            alert('Unable to play pronunciation. Speech synthesis failed.');
-          };
+      const setError = () => {
+        playBtn.textContent = '✗';
+        playBtn.style.background = 'rgba(248,113,113,0.10)';
+        playBtn.style.borderColor = 'rgba(248,113,113,0.30)';
+        playBtn.style.color = '#f87171';
+        setTimeout(resetPlayBtn, 1500);
+      };
 
-          window.speechSynthesis.speak(utterance);
-        } else {
-          playBtn.style.opacity = '1';
-          alert('Speech synthesis not supported in your browser.');
+      const playWithWebSpeech = () => {
+        if (!('speechSynthesis' in window)) { setError(); return; }
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(word);
+        utterance.lang = 'he-IL';
+        utterance.rate = 0.9;
+        utterance.onend = setDone;
+        utterance.onerror = setError;
+        window.speechSynthesis.speak(utterance);
+      };
+
+      playBtn.addEventListener('click', async () => {
+        if (playBtn.disabled) return;
+        setPlaying();
+
+        try {
+          const result = await chrome.runtime.sendMessage({ action: 'previewElevenLabsAudio', text: word });
+
+          if (!result.success) {
+            // No API key or error — fall back to Web Speech
+            playWithWebSpeech();
+            return;
+          }
+
+          // Decode base64 and play via Web Audio
+          const binary = atob(result.audioData);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          const blob = new Blob([bytes], { type: 'audio/mpeg' });
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audio.onended = () => { URL.revokeObjectURL(url); setDone(); };
+          audio.onerror = () => { URL.revokeObjectURL(url); setError(); };
+          audio.play();
+        } catch (err) {
+          playWithWebSpeech();
         }
       });
     }
@@ -499,7 +499,7 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
         console.error('Translation error:', error);
         translateResult.style.display = 'block';
         translateResult.textContent = 'Error fetching translation';
-        translateResult.style.color = '#dc3545';
+        translateResult.style.color = '#f87171';
       } finally {
         translateBtn.disabled = false;
         translateBtn.textContent = 'Google Translate';
@@ -538,13 +538,13 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
           } else {
             reversoResult.style.display = 'block';
             reversoResult.textContent = 'Translation not available';
-            reversoResult.style.color = '#dc3545';
+            reversoResult.style.color = '#f87171';
           }
         } catch (error) {
           console.error('Reverso API error:', error);
           reversoResult.style.display = 'block';
           reversoResult.textContent = 'Error fetching translation';
-          reversoResult.style.color = '#dc3545';
+          reversoResult.style.color = '#f87171';
         } finally {
           reversoBtn.disabled = false;
           reversoBtn.textContent = 'Reverso';
@@ -611,13 +611,13 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
           } else {
             pealimResult.style.display = 'block';
             pealimResult.textContent = 'No results found on Pealim';
-            pealimResult.style.color = '#dc3545';
+            pealimResult.style.color = '#f87171';
           }
         } catch (error) {
           console.error('Pealim error:', error);
           pealimResult.style.display = 'block';
           pealimResult.textContent = 'Error fetching from Pealim';
-          pealimResult.style.color = '#dc3545';
+          pealimResult.style.color = '#f87171';
         } finally {
           pealimBtn.disabled = false;
           pealimBtn.textContent = 'Pealim';
@@ -669,7 +669,9 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
           }
 
           // Success - show feedback
-          markKnownBtn.style.background = '#28a745'; // Green
+          markKnownBtn.style.background = 'rgba(52,211,153,0.12)';
+          markKnownBtn.style.color = '#34d399';
+          markKnownBtn.style.borderColor = 'rgba(52,211,153,0.30)';
           markKnownBtn.textContent = '✓ Added! Refreshing...';
 
           // Refresh word list to update highlighting
@@ -682,7 +684,9 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
 
           // Keep the success state for 2 seconds, then revert
           setTimeout(() => {
-            markKnownBtn.style.background = '#6c757d';
+            markKnownBtn.style.background = '#21212e';
+            markKnownBtn.style.color = '#8f8fa8';
+            markKnownBtn.style.borderColor = '#2c2c3e';
             markKnownBtn.textContent = 'Mark as Already Known';
             markKnownBtn.disabled = false;
           }, 2000);
@@ -691,12 +695,16 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
           console.error('Error adding word to Already Known:', error);
 
           // Show error state
-          markKnownBtn.style.background = '#dc3545'; // Red
+          markKnownBtn.style.background = 'rgba(248,113,113,0.10)';
+          markKnownBtn.style.color = '#f87171';
+          markKnownBtn.style.borderColor = 'rgba(248,113,113,0.30)';
           markKnownBtn.textContent = '✗ Failed to add';
 
           // Revert after 2 seconds
           setTimeout(() => {
-            markKnownBtn.style.background = '#6c757d';
+            markKnownBtn.style.background = '#21212e';
+            markKnownBtn.style.color = '#8f8fa8';
+            markKnownBtn.style.borderColor = '#2c2c3e';
             markKnownBtn.textContent = 'Mark as Already Known';
             markKnownBtn.disabled = false;
           }, 2000);
@@ -764,7 +772,7 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
     });
   } catch (error) {
     console.error('Dictionary lookup error:', error);
-    popup.innerHTML = '<div style="color: #dc3545;">Error loading dictionary</div>';
+    popup.innerHTML = '<div style="padding:16px 18px;color:#f87171;font-size:13px;">Error loading dictionary</div>';
   }
 }
 

@@ -7,6 +7,7 @@
 let ankiModal = null;
 let currentSentence = null;
 let currentAudioFilename = null;
+let currentAudioBlobUrl = null;
 
 function showModalError(message) {
   if (!ankiModal) return;
@@ -169,11 +170,116 @@ async function handleDefine(button, getWordsCallback) {
   }
 }
 
+/**
+ * Handle AI audio generation via ElevenLabs
+ * @param {HTMLElement} button - Button that was clicked
+ */
+async function handleGenerateAudio(button) {
+  const sourceText = getSourceText();
+  if (!sourceText) return;
+
+  button.disabled = true;
+  button.textContent = 'Generating...';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'generateElevenLabsAudio',
+      text: sourceText
+    });
+
+    if (response.success) {
+      currentAudioFilename = response.filename;
+
+      // Populate the audio field textarea: button → buttonDiv → flexDiv → textarea
+      const audioTextarea = button.parentNode.parentNode.querySelector('textarea[data-field-name]');
+      if (audioTextarea) {
+        audioTextarea.value = `[sound:${response.filename}]`;
+        audioTextarea.style.color = '#34d399';
+        audioTextarea.style.borderColor = 'rgba(52,211,153,0.40)';
+      }
+
+      // Store blob URL for playback
+      if (currentAudioBlobUrl) URL.revokeObjectURL(currentAudioBlobUrl);
+      const binary = atob(response.audioData);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'audio/mpeg' });
+      currentAudioBlobUrl = URL.createObjectURL(blob);
+
+      button.textContent = '✓ Audio Ready';
+      button.style.cssText = button.style.cssText.replace(/background:[^;]+/, 'background:#21212e');
+      button.style.color = '#34d399';
+      button.style.borderColor = 'rgba(52,211,153,0.30)';
+
+      // Add/update play button beside AI Audio button
+      const buttonDiv = button.parentNode;
+      let playBtn = buttonDiv.querySelector('.ai-audio-play-btn');
+      if (!playBtn) {
+        playBtn = document.createElement('button');
+        playBtn.className = 'ai-audio-play-btn';
+        playBtn.style.cssText = `
+          padding: 5px 9px;
+          background: rgba(52,211,153,0.12);
+          color: #34d399;
+          border: 1px solid rgba(52,211,153,0.28);
+          border-radius: 5px;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 500;
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.15s ease;
+        `;
+        playBtn.textContent = '▶ Play';
+        playBtn.addEventListener('click', () => {
+          if (currentAudioBlobUrl) {
+            const audio = new Audio(currentAudioBlobUrl);
+            audio.play();
+          }
+        });
+        buttonDiv.insertBefore(playBtn, button.nextSibling);
+      }
+
+      // Audio indicator near sentence display
+      const existing = ankiModal.querySelector('#anki-audio-indicator');
+      if (existing) existing.remove();
+      const audioIndicator = document.createElement('div');
+      audioIndicator.id = 'anki-audio-indicator';
+      audioIndicator.style.cssText = `
+        margin-top: 8px;
+        padding: 5px 12px;
+        background: rgba(52,211,153,0.12);
+        color: #34d399;
+        border: 1px solid rgba(52,211,153,0.28);
+        border-radius: 20px;
+        font-size: 11.5px;
+        font-weight: 500;
+        display: inline-block;
+      `;
+      audioIndicator.textContent = '🎤 Audio generated';
+      const sentenceDisplay = ankiModal.querySelector('#anki-sentence-display');
+      sentenceDisplay.parentNode.insertBefore(audioIndicator, sentenceDisplay.nextSibling);
+    } else {
+      alert('Audio generation failed: ' + (response.error || 'Unknown error'));
+      button.textContent = 'AI Audio';
+    }
+  } catch (error) {
+    console.error('Audio generation error:', error);
+    alert('Audio generation failed');
+    button.textContent = 'AI Audio';
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function attachAIButtonListeners(getWordsCallback) {
   if (!ankiModal) return;
 
   const translateButtons = ankiModal.querySelectorAll('.ai-translate-btn');
   const defineButtons = ankiModal.querySelectorAll('.ai-define-btn');
+  const audioButtons = ankiModal.querySelectorAll('.ai-audio-btn');
 
   translateButtons.forEach(button => {
     button.addEventListener('click', () => handleTranslate(button));
@@ -181,6 +287,10 @@ function attachAIButtonListeners(getWordsCallback) {
 
   defineButtons.forEach(button => {
     button.addEventListener('click', () => handleDefine(button, getWordsCallback));
+  });
+
+  audioButtons.forEach(button => {
+    button.addEventListener('click', () => handleGenerateAudio(button));
   });
 }
 
@@ -191,10 +301,13 @@ async function loadModelFields(getWordsCallback) {
   if (!modelName) return;
 
   try {
-    const response = await chrome.runtime.sendMessage({
-      action: 'getModelFields',
-      modelName: modelName
-    });
+    const [fieldsResponse, settingsResponse] = await Promise.all([
+      chrome.runtime.sendMessage({ action: 'getModelFields', modelName: modelName }),
+      chrome.runtime.sendMessage({ action: 'getSettings' })
+    ]);
+    const audioFieldName = settingsResponse.settings?.audioFieldName || 'Audio';
+
+    const response = fieldsResponse;
 
     if (response.success) {
       const sentenceFieldSelect = ankiModal.querySelector('#anki-sentence-field-select');
@@ -218,63 +331,72 @@ async function loadModelFields(getWordsCallback) {
 
       response.fields.forEach(field => {
         const fieldId = field.replace(/[^a-zA-Z0-9]/g, '_');
+        const isAudioField = field === audioFieldName;
 
         const fieldDiv = document.createElement('div');
-        fieldDiv.style.marginBottom = '15px';
+        fieldDiv.style.marginBottom = '16px';
 
         const label = document.createElement('label');
-        label.style.display = 'block';
-        label.style.marginBottom = '5px';
-        label.style.fontWeight = '500';
-        label.style.color = '#ddd';
-        label.style.fontSize = '16px';
-        label.textContent = `${field}:`;
+        label.style.cssText = 'display:block;margin-bottom:6px;font-weight:500;color:#ededf5;font-size:13px;letter-spacing:0.1px;';
+        label.textContent = field;
         fieldDiv.appendChild(label);
 
         const flexDiv = document.createElement('div');
-        flexDiv.style.display = 'flex';
-        flexDiv.style.gap = '5px';
-        flexDiv.style.alignItems = 'flex-start';
+        flexDiv.style.cssText = 'display:flex;gap:6px;align-items:flex-start;';
 
         const textarea = document.createElement('textarea');
         textarea.id = `anki-field-${fieldId}`;
         textarea.setAttribute('data-field-name', field);
         textarea.style.cssText = `
           flex: 1;
-          min-height: 60px;
-          padding: 8px;
-          border: 1px solid #444;
-          border-radius: 4px;
-          font-size: 14px;
+          min-height: 62px;
+          padding: 8px 11px;
+          border: 1px solid #2c2c3e;
+          border-radius: 6px;
+          font-size: 13.5px;
           font-family: inherit;
           resize: vertical;
-          color: white;
-          background: #1a1a1a;
+          color: #ededf5;
+          background: #1a1a24;
+          outline: none;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease;
+          line-height: 1.5;
         `;
+        textarea.addEventListener('focus', () => {
+          textarea.style.borderColor = '#5a7fff';
+          textarea.style.boxShadow = '0 0 0 3px rgba(90,127,255,0.14)';
+        });
+        textarea.addEventListener('blur', () => {
+          textarea.style.borderColor = '#2c2c3e';
+          textarea.style.boxShadow = 'none';
+        });
         flexDiv.appendChild(textarea);
 
+        const aiButtonStyle = `
+          padding: 5px 9px;
+          background: #21212e;
+          color: #8aabff;
+          border: 1px solid #2c2c3e;
+          border-radius: 5px;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 500;
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.15s ease;
+          letter-spacing: 0.1px;
+        `;
+
         const buttonDiv = document.createElement('div');
-        buttonDiv.style.display = 'flex';
-        buttonDiv.style.flexDirection = 'column';
-        buttonDiv.style.gap = '5px';
+        buttonDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
 
         const translateBtn = document.createElement('button');
         translateBtn.className = 'ai-translate-btn';
         translateBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
         translateBtn.title = 'Translate sentence to English';
-        translateBtn.style.cssText = `
-          padding: 6px 10px;
-          background: #0066ff;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          white-space: nowrap;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        `;
+        translateBtn.style.cssText = aiButtonStyle;
         translateBtn.textContent = 'AI Translate';
         buttonDiv.appendChild(translateBtn);
 
@@ -282,21 +404,18 @@ async function loadModelFields(getWordsCallback) {
         defineBtn.className = 'ai-define-btn';
         defineBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
         defineBtn.title = 'Define unknown word in context';
-        defineBtn.style.cssText = `
-          padding: 6px 10px;
-          background: #0066ff;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 12px;
-          white-space: nowrap;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        `;
+        defineBtn.style.cssText = aiButtonStyle;
         defineBtn.textContent = 'AI Define';
         buttonDiv.appendChild(defineBtn);
+
+        if (isAudioField) {
+          const audioBtn = document.createElement('button');
+          audioBtn.className = 'ai-audio-btn';
+          audioBtn.title = 'Generate audio via ElevenLabs TTS';
+          audioBtn.style.cssText = aiButtonStyle;
+          audioBtn.textContent = 'AI Audio';
+          buttonDiv.appendChild(audioBtn);
+        }
 
         flexDiv.appendChild(buttonDiv);
         fieldDiv.appendChild(flexDiv);
@@ -408,9 +527,10 @@ async function createAnkiCard() {
     const audioFieldName = settingsResponse.settings?.audioFieldName || 'Audio';
 
     const allFieldTextareas = Array.from(fieldTextareas);
-    const hasAudioField = allFieldTextareas.some(textarea => textarea.dataset.fieldName === audioFieldName);
+    const audioTextarea = allFieldTextareas.find(t => t.dataset.fieldName === audioFieldName);
 
-    if (hasAudioField) {
+    // Only override if the textarea doesn't already contain the sound tag (it's pre-populated visually)
+    if (audioTextarea && !fields[audioFieldName]?.includes('[sound:')) {
       fields[audioFieldName] = `[sound:${currentAudioFilename}]`;
     }
   }
@@ -461,18 +581,21 @@ async function createAnkiCard() {
  */
 function showNotification(message, type = 'success') {
   const notification = document.createElement('div');
+  const isSuccess = type === 'success';
   notification.style.cssText = `
     position: fixed;
     top: 20px;
     right: 20px;
     z-index: 10001;
-    background: ${type === 'success' ? '#28a745' : '#dc3545'};
-    color: white;
-    padding: 15px 20px;
-    border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-    font-size: 14px;
+    background: ${isSuccess ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)'};
+    color: ${isSuccess ? '#34d399' : '#f87171'};
+    border: 1px solid ${isSuccess ? 'rgba(52,211,153,0.30)' : 'rgba(248,113,113,0.30)'};
+    padding: 12px 18px;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    font-size: 13.5px;
     font-weight: 500;
+    backdrop-filter: blur(8px);
   `;
   notification.textContent = message;
 
@@ -491,6 +614,10 @@ function closeAnkiModal() {
   }
   currentSentence = null;
   currentAudioFilename = null;
+  if (currentAudioBlobUrl) {
+    URL.revokeObjectURL(currentAudioBlobUrl);
+    currentAudioBlobUrl = null;
+  }
 }
 
 /**
@@ -516,90 +643,122 @@ function createAnkiModal(getWordsCallback) {
 
   modal.innerHTML = `
     <div style="
-      background-color: #272727;
-      color: white;
-      margin: 50px auto;
-      padding: 20px;
-      border-radius: 8px;
-      width: 90%;
+      background: #13131a;
+      color: #ededf5;
+      margin: 48px auto;
+      padding: 0;
+      border-radius: 14px;
+      width: 92%;
       max-width: 500px;
-      max-height: calc(100vh - 100px);
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-      border: 1px solid #333;
+      max-height: calc(100vh - 96px);
+      box-shadow: 0 16px 48px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.06);
+      border: 1px solid #2c2c3e;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       display: flex;
       flex-direction: column;
+      overflow: hidden;
     ">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-        <h2 style="margin: 0; font-size: 20px; color: white;">Create Anki Card</h2>
+      <div style="
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 18px 22px 16px;
+        border-bottom: 1px solid #2c2c3e;
+        background: #13131a;
+        position: relative;
+        flex-shrink: 0;
+      ">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,#5a7fff,#9b6bff 60%,transparent);border-radius:14px 14px 0 0;"></div>
+        <h2 style="margin: 0; font-size: 16px; font-weight: 700; color: #ededf5; letter-spacing: -0.2px;">Create Anki Card</h2>
         <button id="anki-modal-close" style="
-          background: none;
-          border: none;
-          font-size: 24px;
+          background: #1a1a24;
+          border: 1px solid #2c2c3e;
+          width: 28px;
+          height: 28px;
+          border-radius: 6px;
+          font-size: 18px;
+          line-height: 1;
           cursor: pointer;
-          color: #aaa;
+          color: #8f8fa8;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.15s ease;
         ">&times;</button>
       </div>
 
-      <div style="overflow-y: auto; flex: 1; margin-bottom: 15px;">
+      <div style="overflow-y: auto; flex: 1; padding: 20px 22px; scrollbar-width: thin; scrollbar-color: #2c2c3e transparent;">
         <div id="anki-sentence-display" style="
-          background: #1a1a1a;
-          color: white;
-          padding: 12px;
-          border-radius: 4px;
-          margin-bottom: 20px;
+          background: #1a1a24;
+          color: #ededf5;
+          padding: 13px 15px;
+          border-radius: 8px;
+          margin-bottom: 18px;
           direction: rtl;
           font-size: 16px;
           font-weight: 500;
-          border: 1px solid #333;
+          border: 1px solid #2c2c3e;
+          line-height: 1.6;
         "></div>
 
-        <div style="margin-bottom: 15px;">
-          <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #ddd; font-size: 16px;">
-            Deck:
+        <div style="margin-bottom: 14px;">
+          <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #ededf5; font-size: 13px; letter-spacing: 0.1px;">
+            Deck
           </label>
           <select id="anki-deck-select" style="
             width: 100%;
-            padding: 8px;
-            border: 1px solid #444;
-            border-radius: 4px;
-            font-size: 14px;
-            color: white;
-            background: #1a1a1a;
+            padding: 8px 32px 8px 12px;
+            border: 1px solid #2c2c3e;
+            border-radius: 6px;
+            font-size: 13.5px;
+            color: #ededf5;
+            background: #1a1a24;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
           ">
             <option value="">Loading...</option>
           </select>
         </div>
 
-        <div style="margin-bottom: 15px;">
-          <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #ddd; font-size: 16px;">
-            Note Type:
+        <div style="margin-bottom: 14px;">
+          <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #ededf5; font-size: 13px; letter-spacing: 0.1px;">
+            Note Type
           </label>
           <select id="anki-model-select" style="
             width: 100%;
-            padding: 8px;
-            border: 1px solid #444;
-            border-radius: 4px;
-            font-size: 14px;
-            color: white;
-            background: #1a1a1a;
+            padding: 8px 32px 8px 12px;
+            border: 1px solid #2c2c3e;
+            border-radius: 6px;
+            font-size: 13.5px;
+            color: #ededf5;
+            background: #1a1a24;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
           ">
             <option value="">Loading...</option>
           </select>
         </div>
 
-        <div style="margin-bottom: 15px;">
-          <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #ddd; font-size: 16px;">
-            Put sentence in field:
+        <div style="margin-bottom: 18px;">
+          <label style="display: block; margin-bottom: 6px; font-weight: 500; color: #ededf5; font-size: 13px; letter-spacing: 0.1px;">
+            Put sentence in field
           </label>
           <select id="anki-sentence-field-select" style="
             width: 100%;
-            padding: 8px;
-            border: 1px solid #444;
-            border-radius: 4px;
-            font-size: 14px;
-            color: white;
-            background: #1a1a1a;
+            padding: 8px 32px 8px 12px;
+            border: 1px solid #2c2c3e;
+            border-radius: 6px;
+            font-size: 13.5px;
+            color: #ededf5;
+            background: #1a1a24;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            cursor: pointer;
           ">
             <option value="">Select field...</option>
           </select>
@@ -609,42 +768,54 @@ function createAnkiModal(getWordsCallback) {
 
         <div id="anki-error-message" style="
           display: none;
-          background: #721c24;
-          color: #f44336;
-          padding: 10px;
-          border-radius: 4px;
-          margin-top: 15px;
-          font-size: 14px;
-          border: 1px solid #f44336;
+          background: rgba(248,113,113,0.10);
+          color: #f87171;
+          padding: 10px 13px;
+          border-radius: 6px;
+          margin-top: 14px;
+          font-size: 13px;
+          border: 1px solid rgba(248,113,113,0.28);
+          line-height: 1.5;
         "></div>
       </div>
 
-      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+      <div style="
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        padding: 14px 22px;
+        border-top: 1px solid #2c2c3e;
+        background: #13131a;
+        flex-shrink: 0;
+      ">
         <button id="anki-modal-cancel" style="
-          padding: 10px 20px;
-          background: #555;
-          color: white;
-          border: none;
-          border-radius: 4px;
+          padding: 8px 18px;
+          background: #21212e;
+          color: #8f8fa8;
+          border: 1px solid #2c2c3e;
+          border-radius: 6px;
           cursor: pointer;
-          font-size: 14px;
+          font-size: 13px;
           font-weight: 500;
           display: flex;
           align-items: center;
           justify-content: center;
+          transition: all 0.15s ease;
         ">Cancel</button>
         <button id="anki-modal-create" style="
-          padding: 10px 20px;
-          background: #0066ff;
+          padding: 8px 20px;
+          background: #5a7fff;
           color: white;
           border: none;
-          border-radius: 4px;
+          border-radius: 6px;
           cursor: pointer;
-          font-size: 14px;
-          font-weight: 500;
+          font-size: 13px;
+          font-weight: 600;
           display: flex;
           align-items: center;
           justify-content: center;
+          box-shadow: 0 2px 8px rgba(90,127,255,0.30);
+          transition: all 0.15s ease;
         ">Create Card</button>
       </div>
     </div>
@@ -684,11 +855,13 @@ async function openAnkiModal(sentence, getWordsCallback, audioFilename = null) {
     const audioIndicator = document.createElement('div');
     audioIndicator.style.cssText = `
       margin-top: 8px;
-      padding: 6px 12px;
-      background: #28a745;
-      color: white;
-      border-radius: 4px;
-      font-size: 12px;
+      padding: 5px 12px;
+      background: rgba(52,211,153,0.12);
+      color: #34d399;
+      border: 1px solid rgba(52,211,153,0.28);
+      border-radius: 20px;
+      font-size: 11.5px;
+      font-weight: 500;
       display: inline-block;
     `;
     audioIndicator.textContent = '🎤 Audio recorded';

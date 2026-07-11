@@ -8,7 +8,7 @@ let matureWords = [];
 let learningWords = [];
 let matureColor = '#ffff00';    // Yellow for mature words
 let learningColor = '#ffa500';  // Orange for learning words
-let sentenceColor = '#add8e6';  // Light blue for i+1 sentences
+let sentenceColor = '#5a7fff';  // Blue for i+1 sentences
 let highlightEnabled = true;
 let sentenceHighlightEnabled = true;
 let isHighlighted = false;
@@ -82,7 +82,7 @@ async function initialize() {
     if (settingsData.settings) {
       matureColor = settingsData.settings.highlightColor;
       learningColor = settingsData.settings.learningColor;
-      sentenceColor = settingsData.settings.sentenceColor || '#add8e6';
+      sentenceColor = settingsData.settings.sentenceColor || '#5a7fff';
       highlightEnabled = settingsData.settings.highlightEnabled;
       sentenceHighlightEnabled = settingsData.settings.sentenceHighlightEnabled !== false;
     }
@@ -193,7 +193,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       if (newSettings) {
         matureColor = newSettings.highlightColor;
         learningColor = newSettings.learningColor;
-        sentenceColor = newSettings.sentenceColor || '#add8e6';
+        sentenceColor = newSettings.sentenceColor || '#5a7fff';
         const wasEnabled = highlightEnabled;
         const wasSentenceEnabled = sentenceHighlightEnabled;
         highlightEnabled = newSettings.highlightEnabled;
@@ -253,7 +253,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     learningWords = request.learningWords || [];
     matureColor = request.matureColor || matureColor;
     learningColor = request.learningColor || learningColor;
-    sentenceColor = request.sentenceColor || sentenceColor;
+    sentenceColor = request.sentenceColor || sentenceColor;  // keep existing value if not provided
     highlightEnabled = request.enabled !== undefined ? request.enabled : highlightEnabled;
     sentenceHighlightEnabled = request.sentenceEnabled !== undefined ? request.sentenceEnabled : sentenceHighlightEnabled;
 
@@ -318,33 +318,25 @@ const observer = new MutationObserver((mutations) => {
   let shouldProcess = false;
 
   for (const mutation of mutations) {
-    // Skip mutations inside subtitle overlays (they handle their own highlighting)
+    // Skip mutations inside subtitle overlays and browsers (they handle their own highlighting)
     const target = mutation.target;
+    const specialIds = [
+      window.DOM_IDS.YOUTUBE_OVERLAY, window.DOM_IDS.NETFLIX_OVERLAY, window.DOM_IDS.STREAMISRAEL_OVERLAY,
+      window.DOM_IDS.YOUTUBE_BROWSER, window.DOM_IDS.NETFLIX_BROWSER, window.DOM_IDS.STREAMISRAEL_BROWSER
+    ];
     if (target && (
-      target.id === window.DOM_IDS.YOUTUBE_OVERLAY ||
-      target.id === window.DOM_IDS.NETFLIX_OVERLAY ||
-      target.id === window.DOM_IDS.STREAMISRAEL_OVERLAY ||
-      (target.closest && (
-        target.closest(`#${window.DOM_IDS.YOUTUBE_OVERLAY}`) ||
-        target.closest(`#${window.DOM_IDS.NETFLIX_OVERLAY}`) ||
-        target.closest(`#${window.DOM_IDS.STREAMISRAEL_OVERLAY}`)
-      ))
+      specialIds.includes(target.id) ||
+      (target.closest && specialIds.some(id => id && target.closest(`#${id}`)))
     )) {
       continue; // Skip this mutation
     }
 
     if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
       for (const node of mutation.addedNodes) {
-        // Skip if node is or is inside a subtitle overlay
+        // Skip if node is or is inside a subtitle overlay or browser
         if (node.nodeType === Node.ELEMENT_NODE) {
-          if (node.id === window.DOM_IDS.YOUTUBE_OVERLAY ||
-              node.id === window.DOM_IDS.NETFLIX_OVERLAY ||
-              node.id === window.DOM_IDS.STREAMISRAEL_OVERLAY ||
-              (node.closest && (
-                node.closest(`#${window.DOM_IDS.YOUTUBE_OVERLAY}`) ||
-                node.closest(`#${window.DOM_IDS.NETFLIX_OVERLAY}`) ||
-                node.closest(`#${window.DOM_IDS.STREAMISRAEL_OVERLAY}`)
-              ))) {
+          if (specialIds.includes(node.id) ||
+              (node.closest && specialIds.some(id => id && node.closest(`#${id}`)))) {
             continue; // Skip this node
           }
         }
@@ -452,28 +444,15 @@ function handleSubtitleUpdate(subtitleElement, platform) {
       span.style.textDecoration = 'underline';
       span.style.textDecorationThickness = '2px';
 
-      // Platform-specific word styling
-      if (platform === 'streamisrael') {
-        // StreamIsrael uses custom colors with titles
-        const underlineColors = {
-          'mature': matureColor,
-          'learning': learningColor,
-          'potentially-known': '#9370db',
-          'unknown': '#dc3545'
-        };
-        span.style.textDecorationColor = underlineColors[m.type] || '#dc3545';
+      span.style.textDecorationColor = getUnderlineColor(m.type);
 
-        const titles = {
-          'mature': 'Mature card',
-          'learning': 'Learning card',
-          'potentially-known': 'Potentially known (prefix detected)',
-          'unknown': 'Unknown word'
-        };
-        span.title = titles[m.type] || 'Unknown word';
-      } else {
-        // YouTube and Netflix use getUnderlineColor()
-        span.style.textDecorationColor = getUnderlineColor(m.type);
-      }
+      const titles = {
+        'mature': 'Mature card',
+        'learning': 'Learning card',
+        'potentially-known': 'Potentially known (prefix detected)',
+        'unknown': 'Unknown word'
+      };
+      span.title = titles[m.type] || 'Unknown word';
 
       fragment.appendChild(span);
       lastIndex = m.index + m.length;
@@ -491,15 +470,27 @@ function handleSubtitleUpdate(subtitleElement, platform) {
     const isI1 = window.checkIfI1Sentence(subtitleText, matureWords, learningWords);
     const isPotentiallyI1 = !isI1 && window.checkIfPotentiallyI1Sentence(subtitleText, matureWords, learningWords);
 
-    if (isI1) {
-      const spans = subtitleElement.querySelectorAll('.anki-hebrew-highlight');
-      spans.forEach(span => {
-        span.style.backgroundColor = sentenceColor;
-        span.style.color = 'black';
-        span.style.borderRadius = '3px';
-        span.style.padding = '2px 4px';
+    // Helper: apply border+glow style to a span given an accent hex colour
+    const applyI1Style = (span, hexColor) => {
+      const r = parseInt(hexColor.slice(1, 3), 16);
+      const g = parseInt(hexColor.slice(3, 5), 16);
+      const b = parseInt(hexColor.slice(5, 7), 16);
+      span.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.12)`;
+      span.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.55)`;
+      span.style.boxShadow = `0 0 6px rgba(${r}, ${g}, ${b}, 0.18)`;
+      span.style.borderRadius = '3px';
+      span.style.padding = '1px 4px';
+    };
 
-        // Platform-specific sentence styling
+    if (isI1) {
+      // Apply border+glow only to unknown words
+      subtitleElement.querySelectorAll('.anki-unknown').forEach(span => {
+        applyI1Style(span, sentenceColor);
+        span.style.textDecorationColor = sentenceColor;
+      });
+
+      // Platform-specific sentence styling on all highlighted spans
+      subtitleElement.querySelectorAll('.anki-hebrew-highlight').forEach(span => {
         if (platform === 'streamisrael') {
           span.title = span.title + ' (i+1 sentence)';
         } else {
@@ -516,14 +507,14 @@ function handleSubtitleUpdate(subtitleElement, platform) {
         subtitleElement.title = 'Shift+click to create Anki card (i+1 sentence)';
       }
     } else if (isPotentiallyI1) {
-      const spans = subtitleElement.querySelectorAll('.anki-hebrew-highlight');
-      spans.forEach(span => {
-        span.style.backgroundColor = '#e6d5f5'; // Light purple
-        span.style.color = 'black';
-        span.style.borderRadius = '3px';
-        span.style.padding = '2px 4px';
+      // Apply border+glow only to unknown words
+      subtitleElement.querySelectorAll('.anki-unknown').forEach(span => {
+        applyI1Style(span, '#9b6bff');
+        span.style.textDecorationColor = '#9b6bff';
+      });
 
-        // Platform-specific sentence styling
+      // Platform-specific sentence styling on all highlighted spans
+      subtitleElement.querySelectorAll('.anki-hebrew-highlight').forEach(span => {
         if (platform === 'streamisrael') {
           span.title = span.title + ' (potentially i+1 sentence)';
         } else {
@@ -683,7 +674,7 @@ if (document.readyState === 'loading') {
         const matureWordsLocal = storage.matureWords || [];
         const learningWordsLocal = storage.learningWords || [];
         const sentenceHighlightEnabledLocal = storage.settings?.sentenceHighlightEnabled !== false;
-        const sentenceColorLocal = storage.settings?.sentenceColor || '#add8e6';
+        const sentenceColorLocal = storage.settings?.sentenceColor || '#5a7fff';
 
         data.subtitles.forEach((sub) => {
           const item = document.createElement('div');
@@ -691,14 +682,20 @@ if (document.readyState === 'loading') {
 
           const isI1 = sentenceHighlightEnabledLocal && window.checkIfI1Sentence(sub.text, matureWordsLocal, learningWordsLocal);
 
+          // Parse the hex colour for rgba derivation
+          const r = parseInt(sentenceColorLocal.slice(1, 3), 16);
+          const g = parseInt(sentenceColorLocal.slice(3, 5), 16);
+          const b = parseInt(sentenceColorLocal.slice(5, 7), 16);
+
           item.style.cssText = `
             padding: 10px;
             margin-bottom: 8px;
             border-radius: 4px;
             cursor: pointer;
-            border: 2px solid transparent;
-            transition: border-color 0.2s;
-            background: ${isI1 ? sentenceColorLocal : '#1a1a1a'};
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background: ${isI1 ? `rgba(${r}, ${g}, ${b}, 0.12)` : '#1a1a1a'};
+            border: 1px solid ${isI1 ? `rgba(${r}, ${g}, ${b}, 0.55)` : 'transparent'};
+            box-shadow: ${isI1 ? `0 0 6px rgba(${r}, ${g}, ${b}, 0.18)` : 'none'};
           `;
 
           if (isI1) {
@@ -707,11 +704,11 @@ if (document.readyState === 'loading') {
           }
 
           item.addEventListener('mouseenter', () => {
-            item.style.borderColor = '#0066ff';
+            item.style.borderColor = `rgba(${r}, ${g}, ${b}, 0.85)`;
           });
 
           item.addEventListener('mouseleave', () => {
-            item.style.borderColor = 'transparent';
+            item.style.borderColor = isI1 ? `rgba(${r}, ${g}, ${b}, 0.55)` : 'transparent';
           });
 
           // Timestamp
@@ -719,7 +716,7 @@ if (document.readyState === 'loading') {
           timestamp.textContent = window.formatTimestamp(sub.startTime, sub.endTime);
           timestamp.style.cssText = `
             font-size: 12px;
-            color: ${isI1 ? '#000' : '#aaa'};
+            color: #aaa;
             margin-bottom: 6px;
           `;
           item.appendChild(timestamp);
@@ -732,7 +729,7 @@ if (document.readyState === 'loading') {
             font-size: 24px;
             direction: rtl;
             line-height: 1.4;
-            color: ${isI1 ? '#000' : 'inherit'};
+            color: #ededf5;
           `;
           item.appendChild(text);
 

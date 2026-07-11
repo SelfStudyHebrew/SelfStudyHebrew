@@ -269,7 +269,8 @@ let currentSentencesPerWord = 3;
 
 // Open i+1 generator modal
 async function openI1Generator() {
-  i1Modal.style.display = 'block';
+  document.body.style.minHeight = '600px';
+  i1Modal.style.display = 'flex';
 
   // Check if we have saved word review state (highest priority - restore in-progress review)
   const reviewData = await chrome.storage.local.get(['i1WordReview']);
@@ -326,6 +327,7 @@ async function openI1Generator() {
 // Close modal
 function closeI1Modal() {
   i1Modal.style.display = 'none';
+  document.body.style.minHeight = '';
 }
 
 // Start sentence generation - first get unknown words for review
@@ -619,7 +621,7 @@ async function confirmWords() {
         document.getElementById('saved-results-count').textContent = response.data.length;
       }
 
-      displayResults(response.data);
+      displayResults(response.data, response.sessionCost, response.totalSpend);
       generationProgress.style.display = 'none';
       generationResults.style.display = 'block';
     } else {
@@ -635,9 +637,41 @@ async function confirmWords() {
   }
 }
 
+function formatCost(usd) {
+  if (usd === undefined || usd === null) return '';
+  if (usd < 0.0001) return '<$0.0001';
+  return `$${usd.toFixed(4)}`;
+}
+
 // Display generation results
-function displayResults(data) {
+function displayResults(data, sessionCost, totalSpend) {
   resultsContainer.innerHTML = '';
+
+  // Cost summary banner
+  if (sessionCost !== undefined) {
+    const banner = document.createElement('div');
+    banner.style.cssText = `
+      background: #1a1a24;
+      border: 1px solid #2c2c3e;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    `;
+
+    const sessionEl = document.createElement('span');
+    sessionEl.innerHTML = `<span style="color:#8f8fa8">This session:</span> <span style="color:#ededf5;font-weight:600">${formatCost(sessionCost)}</span>`;
+
+    const totalEl = document.createElement('span');
+    totalEl.innerHTML = `<span style="color:#8f8fa8">All-time total:</span> <span style="color:#5a7fff;font-weight:600">${formatCost(totalSpend)}</span>`;
+
+    banner.appendChild(sessionEl);
+    banner.appendChild(totalEl);
+    resultsContainer.appendChild(banner);
+  }
 
   data.forEach((wordData, index) => {
     const section = document.createElement('div');
@@ -650,12 +684,24 @@ function displayResults(data) {
     word.className = 'result-unknown-word';
     word.textContent = wordData.word;
 
+    const metaRight = document.createElement('div');
+    metaRight.style.cssText = 'display:flex;gap:10px;align-items:center;';
+
     const frequency = document.createElement('div');
     frequency.className = 'result-frequency';
     frequency.textContent = `Rank #${wordData.rank || (index + 1)}`;
 
+    metaRight.appendChild(frequency);
+
+    if (wordData.cost !== undefined) {
+      const costEl = document.createElement('div');
+      costEl.style.cssText = 'font-size:11.5px;color:#8f8fa8;background:var(--surface-3,#21212e);padding:2px 8px;border-radius:10px;border:1px solid #2c2c3e;';
+      costEl.textContent = formatCost(wordData.cost);
+      metaRight.appendChild(costEl);
+    }
+
     header.appendChild(word);
-    header.appendChild(frequency);
+    header.appendChild(metaRight);
     section.appendChild(header);
 
     const sentencesList = document.createElement('ul');
@@ -679,27 +725,39 @@ function displayResults(data) {
         justify-content: flex-start;
       `;
 
-      const copyBtn = document.createElement('button');
-      copyBtn.textContent = '📋';
-      copyBtn.title = 'Copy to Clipboard';
-      copyBtn.style.cssText = `
-        background: #555;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        padding: 4px 8px;
+      const btnBase = `
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 5px;
+        border: 1px solid #2c2c3e;
         cursor: pointer;
-        font-size: 16px;
+        font-size: 11px;
+        font-weight: 700;
+        font-family: inherit;
+        letter-spacing: 0.01em;
+        transition: background 0.15s, border-color 0.15s;
       `;
+
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'C';
+      copyBtn.title = 'Copy to clipboard';
+      copyBtn.style.cssText = btnBase + 'background:#21212e;color:#8f8fa8;';
 
       copyBtn.addEventListener('click', async () => {
         try {
           await navigator.clipboard.writeText(sentence);
           copyBtn.textContent = '✓';
-          copyBtn.style.background = '#28a745';
+          copyBtn.style.background = 'rgba(52,211,153,0.15)';
+          copyBtn.style.color = '#34d399';
+          copyBtn.style.borderColor = '#34d399';
           setTimeout(() => {
-            copyBtn.textContent = '📋';
-            copyBtn.style.background = '#555';
+            copyBtn.textContent = 'C';
+            copyBtn.style.background = '#21212e';
+            copyBtn.style.color = '#8f8fa8';
+            copyBtn.style.borderColor = '#2c2c3e';
           }, 1500);
         } catch (error) {
           console.error('Error copying to clipboard:', error);
@@ -708,17 +766,12 @@ function displayResults(data) {
       });
 
       const reversoBtn = document.createElement('button');
-      reversoBtn.textContent = '🔄';
-      reversoBtn.title = 'Translate on Reverso';
-      reversoBtn.style.cssText = `
-        background: #0066cc;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        padding: 4px 8px;
-        cursor: pointer;
-        font-size: 16px;
-      `;
+      reversoBtn.textContent = 'R';
+      reversoBtn.title = 'Open in Reverso';
+      reversoBtn.style.cssText = btnBase + 'background:#21212e;color:#8f8fa8;';
+
+      reversoBtn.addEventListener('mouseenter', () => { reversoBtn.style.borderColor = '#5a7fff'; reversoBtn.style.color = '#ededf5'; });
+      reversoBtn.addEventListener('mouseleave', () => { reversoBtn.style.borderColor = '#2c2c3e'; reversoBtn.style.color = '#8f8fa8'; });
 
       reversoBtn.addEventListener('click', () => {
         const encodedSentence = encodeURIComponent(sentence);
@@ -726,18 +779,16 @@ function displayResults(data) {
         chrome.tabs.create({ url: reversoUrl });
       });
 
+      copyBtn.addEventListener('mouseenter', () => { copyBtn.style.borderColor = '#5a7fff'; copyBtn.style.color = '#ededf5'; });
+      copyBtn.addEventListener('mouseleave', () => { copyBtn.style.borderColor = '#2c2c3e'; copyBtn.style.color = '#8f8fa8'; });
+
       const createCardBtn = document.createElement('button');
-      createCardBtn.textContent = '🃏';
-      createCardBtn.title = 'Create Anki Card';
-      createCardBtn.style.cssText = `
-        background: #0066ff;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        padding: 4px 8px;
-        cursor: pointer;
-        font-size: 16px;
-      `;
+      createCardBtn.textContent = 'A';
+      createCardBtn.title = 'Create Anki card';
+      createCardBtn.style.cssText = btnBase + 'background:#21212e;color:#8f8fa8;';
+
+      createCardBtn.addEventListener('mouseenter', () => { createCardBtn.style.borderColor = '#5a7fff'; createCardBtn.style.color = '#ededf5'; });
+      createCardBtn.addEventListener('mouseleave', () => { createCardBtn.style.borderColor = '#2c2c3e'; createCardBtn.style.color = '#8f8fa8'; });
 
       createCardBtn.addEventListener('click', async () => {
         try {

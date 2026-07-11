@@ -22,17 +22,63 @@
       <h2>AI Integration</h2>
 
       <div class="setting-item">
+        <label>Claude API Spend</label>
+        <div id="spend-display" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <span style="font-size:22px;font-weight:700;" id="spend-total">$0.0000</span>
+          <button type="button" id="reset-spend-btn" style="font-size:12px;padding:4px 10px;">Reset total</button>
+        </div>
+        <p class="description">Running total of Claude API costs tracked by the extension (sentence generation only). Resets to zero if you click "Reset total".</p>
+      </div>
+
+      <div class="setting-item">
         <label for="claude-api-key">Claude API Key</label>
         <input type="password" id="claude-api-key" value="" placeholder="sk-ant-api03-...">
         <p class="description">Your Anthropic Claude API key for AI-powered translations and definitions. Get one at <a href="https://console.anthropic.com/" target="_blank">console.anthropic.com</a></p>
+      </div>
+
+      <div class="setting-item">
+        <label for="claude-model">Claude Model</label>
+        <input type="text" id="claude-model" value="claude-sonnet-4-6" placeholder="claude-sonnet-4-6">
+        <p class="description">Claude model ID to use for translations and definitions. See available model IDs at <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank">platform.claude.com/docs/en/about-claude/models/overview</a></p>
         <p class="description" style="font-weight: 600; color: #ff8c00;">⚠️ Strongly recommended: Set API spend limits at <a href="https://console.anthropic.com/settings/limits" target="_blank">console.anthropic.com/settings/limits</a> and ensure "Auto reload credits" is disabled at <a href="https://console.anthropic.com/settings/billing" target="_blank">console.anthropic.com/settings/billing</a> to avoid unexpected charges.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="elevenlabs-api-key">ElevenLabs API Key</label>
+        <input type="password" id="elevenlabs-api-key" value="" placeholder="sk_...">
+        <p class="description">Your ElevenLabs API key for generating Hebrew audio on Anki cards. Get one at <a href="https://elevenlabs.io/" target="_blank">elevenlabs.io</a></p>
+      </div>
+
+      <div class="setting-item">
+        <label for="elevenlabs-voice-id">ElevenLabs Voice ID</label>
+        <input type="text" id="elevenlabs-voice-id" value="Jrq4GqCKqYpigdQsZRkP" placeholder="Jrq4GqCKqYpigdQsZRkP">
+        <p class="description">Voice ID to use for TTS. Find IDs at <a href="https://elevenlabs.io/voice-library" target="_blank">elevenlabs.io/voice-library</a></p>
+      </div>
+
+      <div class="setting-item">
+        <label for="elevenlabs-model">ElevenLabs Model</label>
+        <input type="text" id="elevenlabs-model" value="eleven_v3" placeholder="eleven_v3">
+        <p class="description">ElevenLabs TTS model ID. See available models at <a href="https://elevenlabs.io/docs/models" target="_blank">elevenlabs.io/docs/models</a>. Note: Hebrew is only supported in <strong>eleven_v3</strong>.</p>
       </div>
 
       <div class="setting-item">
         <label for="max-words-i1">Max Words for i+1 Generation</label>
         <input type="number" id="max-words-i1" value="3000" min="500" max="10000" step="500">
         <p class="description">Total known words to send for i+1 sentence generation, split 50/50: half from most frequent words, half random sample from remaining words. Lower = cheaper API costs, higher = more sentence variety. (Default: 3000 = 1,500 frequent + 1,500 random)</p>
-        <p class="description" style="font-size: 12px; color: #888;">💡 Cost estimate at 3000 words: ~$0.05 per session (5 words), ~$17/year for daily use</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="sentence-generation-prompt">Sentence Generation Prompt</label>
+        <p class="description">The user prompt sent to Claude for each target word. Use <code>{{TARGET_WORD}}</code> and <code>{{COUNT}}</code> as placeholders — they are substituted at runtime.</p>
+        <textarea id="sentence-generation-prompt" rows="18" style="width:100%; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+        <button type="button" id="reset-prompt-btn" style="margin-top: 8px;">Reset to Default</button>
+      </div>
+
+      <div class="setting-item">
+        <label for="ai-define-prompt">AI Define Prompt</label>
+        <p class="description">The prompt sent to Claude when defining a word. Use <code>{{SENTENCE}}</code> and <code>{{WORD}}</code> as placeholders — they are substituted at runtime.</p>
+        <textarea id="ai-define-prompt" rows="18" style="width:100%; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+        <button type="button" id="reset-define-prompt-btn" style="margin-top: 8px;">Reset to Default</button>
       </div>
     </div>
 

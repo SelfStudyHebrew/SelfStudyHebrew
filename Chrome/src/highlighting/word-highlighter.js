@@ -224,10 +224,13 @@
   function removeHighlights() {
     const highlights = document.querySelectorAll(`.${window.CSS_CLASSES.WORD_HIGHLIGHT}`);
     highlights.forEach(span => {
-      // Skip highlights inside subtitle overlays (they manage their own highlighting)
+      // Skip highlights inside subtitle overlays and browsers (they manage their own highlighting)
       if (span.closest(`#${window.DOM_IDS.YOUTUBE_OVERLAY}`) ||
           span.closest(`#${window.DOM_IDS.NETFLIX_OVERLAY}`) ||
-          span.closest(`#${window.DOM_IDS.STREAMISRAEL_OVERLAY}`)) {
+          span.closest(`#${window.DOM_IDS.STREAMISRAEL_OVERLAY}`) ||
+          span.closest(`#${window.DOM_IDS.YOUTUBE_BROWSER}`) ||
+          span.closest(`#${window.DOM_IDS.NETFLIX_BROWSER}`) ||
+          span.closest(`#${window.DOM_IDS.STREAMISRAEL_BROWSER}`)) {
         return;
       }
 

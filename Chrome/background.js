@@ -1,6 +1,6 @@
 const ANKI_CONNECT_URL = 'http://localhost:8765';
 const DEFAULT_SETTINGS = {
-  sentenceColor: '#add8e6',   // Sentences with 1 unknown word (light blue)
+  sentenceColor: '#5a7fff',   // Sentences with 1 unknown word (blue)
   fieldName: 'Hebrew',
   deckFilter: '',
   highlightEnabled: true,
@@ -8,12 +8,34 @@ const DEFAULT_SETTINGS = {
   stripNikudEnabled: false,  // Strip nikud (vowel marks) from Hebrew text
   matureThreshold: 21,  // Days - cards with interval >= this are "mature"
   claudeApiKey: '',  // Claude API key for AI features
+  claudeModel: 'claude-sonnet-4-6',  // Claude model ID for AI features
+  elevenLabsApiKey: '',  // ElevenLabs API key for TTS audio generation
+  elevenLabsVoiceId: 'Jrq4GqCKqYpigdQsZRkP',  // Default voice (Anatole)
+  elevenLabsModel: 'eleven_v3',  // ElevenLabs TTS model ID
   defaultDeck: 'Sentence Mining',  // Default deck for card creation
   defaultNoteType: 'SelfStudyHebrew',  // Default note type for card creation
   audioFieldName: 'Audio',  // Field name for subtitle audio recordings
   autoExportEnabled: true,  // Auto-export custom definitions on change
   autoExportFilename: 'selfstudyhebrew-custom-definitions.json',  // Filename for auto-export
-  maxWordsForI1: 3000  // Max known words to send for i+1 generation (top frequent + random sampling)
+  maxWordsForI1: 3000,  // Max known words to send for i+1 generation (top frequent + random sampling)
+  sentenceGenerationPrompt: `TARGET WORD (unknown to student): {{TARGET_WORD}}
+
+Generate {{COUNT}} natural Hebrew sentences following these rules:
+
+1. Each sentence MUST contain the exact target word "{{TARGET_WORD}}" with no modifications (No added prefixes/prepositions)
+2. All other words MUST come from the known words list only
+3. You MAY add prefixes/prepositions to known words when grammatically necessary, but not the target word as this should not be modified. For example, if the target word is בר then you should NOT change it to לבר or הבר or ובר
+4. Sentences must be natural, grammatically correct Hebrew that native speakers would use
+5. Vary sentence structure, context, and length
+6. Keep sentences simple but meaningful
+
+CRITICAL CONSTRAINTS:
+- Do NOT use any words outside the known words list (except the target word)
+- Do NOT modify the target word itself (no prefixes/suffixes unless the word already has them)
+- Do NOT add explanations, translations, or numbering
+
+OUTPUT FORMAT: Return ONLY {{COUNT}} Hebrew sentences, one per line, nothing else.`,
+  aiDefinePrompt: ''  // Empty = use DEFAULT_DEFINE_PROMPT (defined later in this file)
 };
 
 const DB_NAME = 'HebrewDictionary';
@@ -218,6 +240,7 @@ chrome.runtime.onStartup.addListener(async () => {
   await loadDictionaries();
 });
 
+
 async function ankiConnectInvoke(action, params = {}) {
   const response = await fetch(ANKI_CONNECT_URL, {
     method: 'POST',
@@ -299,55 +322,114 @@ async function setupAnkiForSelfStudyHebrew() {
       console.warn('Could not configure deck settings:', configError.message);
     }
 
+    const SSH_CSS = `
+      .card {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 18px;
+        text-align: center;
+        color: #ededf5;
+        background-color: #0b0b10;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        padding: 0;
+      }
+
+      .card-inner {
+        width: 100%;
+        max-width: 560px;
+        padding: 32px 24px;
+      }
+
+      .hebrew {
+        font-family: Arial, sans-serif;
+        font-size: 36px;
+        font-weight: 500;
+        direction: rtl;
+        line-height: 1.5;
+        color: #ededf5;
+        margin-bottom: 24px;
+        letter-spacing: 0.01em;
+      }
+
+      hr#answer {
+        border: none;
+        border-top: 1px solid #2c2c3e;
+        margin: 24px 0;
+      }
+
+      .english {
+        font-size: 20px;
+        color: #ededf5;
+        margin-bottom: 12px;
+        line-height: 1.5;
+      }
+
+      .notes {
+        font-size: 15px;
+        color: #8f8fa8;
+        margin-top: 16px;
+        line-height: 1.6;
+        background: #13131a;
+        border: 1px solid #2c2c3e;
+        border-radius: 8px;
+        padding: 12px 16px;
+        text-align: left;
+      }
+
+      .audio-wrap {
+        margin-top: 20px;
+      }
+
+      /* Night mode — already dark, so no changes needed */
+      .night_mode .card {
+        background-color: #0b0b10;
+        color: #ededf5;
+      }
+    `;
+
+    const SSH_FRONT = `<div class="card-inner">
+  <div class="hebrew">{{Hebrew}}</div>
+</div>`;
+
+    const SSH_BACK = `<div class="card-inner">
+  <div class="hebrew">{{Hebrew}}</div>
+
+  <hr id=answer>
+
+  <div class="english">{{English}}</div>
+
+  {{#Notes}}
+  <div class="notes">{{Notes}}</div>
+  {{/Notes}}
+
+  <div class="audio-wrap">{{Audio}}</div>
+</div>`;
+
     const existingModels = await ankiConnectInvoke('modelNames');
 
     if (!existingModels.includes('SelfStudyHebrew')) {
       await ankiConnectInvoke('createModel', {
         modelName: 'SelfStudyHebrew',
         inOrderFields: ['Hebrew', 'English', 'Notes', 'Audio'],
-        css: `
-          .card {
-            font-family: arial;
-            font-size: 20px;
-            text-align: center;
-            color: black;
-            background-color: white;
-          }
-          .hebrew {
-            font-size: 28px;
-            direction: rtl;
-            margin-bottom: 20px;
-          }
-          .english {
-            font-size: 20px;
-            margin-bottom: 15px;
-          }
-          .notes {
-            font-size: 20px;
-            margin-top: 15px;
-          }
-        `,
-        cardTemplates: [
-          {
-            Name: 'Card 1',
-            Front: '<div class="hebrew">{{Hebrew}}</div>',
-            Back: `<div class="hebrew">{{Hebrew}}</div>
-
-<hr id=answer>
-
-<div class="english">{{English}}</div>
-
-{{#Notes}}
-<div class="notes">{{Notes}}</div>
-{{/Notes}}
-
-{{Audio}}`
-          }
-        ]
+        css: SSH_CSS,
+        cardTemplates: [{ Name: 'Card 1', Front: SSH_FRONT, Back: SSH_BACK }]
       });
       console.log('✓ Created SelfStudyHebrew note type');
     } else {
-      console.log('SelfStudyHebrew note type already exists');
+      // Update existing note type styling and templates
+      await ankiConnectInvoke('updateModelStyling', {
+        model: { name: 'SelfStudyHebrew', css: SSH_CSS }
+      });
+      await ankiConnectInvoke('updateModelTemplates', {
+        model: {
+          name: 'SelfStudyHebrew',
+          templates: { 'Card 1': { Front: SSH_FRONT, Back: SSH_BACK } }
+        }
+      });
+      console.log('✓ Updated SelfStudyHebrew note type');
     }
 
     return {
@@ -523,7 +605,7 @@ async function callClaudeAPI(apiKey, prompt, options = {}) {
   }
 
   const requestBody = {
-    model: options.model || 'claude-sonnet-4-5-20250929',
+    model: options.model || DEFAULT_SETTINGS.claudeModel,
     max_tokens: options.max_tokens || 1024,
     messages: messages
   };
@@ -549,34 +631,138 @@ async function callClaudeAPI(apiKey, prompt, options = {}) {
   }
 
   const data = await response.json();
-  return data.content[0].text;
+  return { text: data.content[0].text, usage: data.usage || {} };
 }
 
-async function translateSentence(sentence, apiKey) {
+// Add cost to the running total in storage
+async function accumulateSpend(cost) {
+  if (!cost) return;
+  const data = await chrome.storage.local.get('claudeSpendTotal');
+  await chrome.storage.local.set({ claudeSpendTotal: (data.claudeSpendTotal || 0) + cost });
+}
+
+// Calculate cost of a Claude API call from usage metadata
+function calculateClaudeCost(usage, model) {
+  const m = (model || '').toLowerCase();
+  let pricing;
+  if (m.includes('haiku')) {
+    pricing = { input: 0.80, output: 4.0, cacheWrite: 1.0, cacheRead: 0.08 };
+  } else if (m.includes('opus')) {
+    pricing = { input: 15.0, output: 75.0, cacheWrite: 18.75, cacheRead: 1.5 };
+  } else {
+    // Sonnet (default)
+    pricing = { input: 3.0, output: 15.0, cacheWrite: 3.75, cacheRead: 0.30 };
+  }
+  const cacheCreation = usage.cache_creation_input_tokens || 0;
+  const cacheRead = usage.cache_read_input_tokens || 0;
+  const plainInput = Math.max(0, (usage.input_tokens || 0) - cacheCreation - cacheRead);
+  return (
+    (plainInput      / 1_000_000) * pricing.input +
+    ((usage.output_tokens || 0) / 1_000_000) * pricing.output +
+    (cacheCreation   / 1_000_000) * pricing.cacheWrite +
+    (cacheRead       / 1_000_000) * pricing.cacheRead
+  );
+}
+
+async function generateElevenLabsAudio(text, apiKey, voiceId, model) {
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    method: 'POST',
+    headers: {
+      'xi-api-key': apiKey,
+      'Content-Type': 'application/json',
+      'Accept': 'audio/mpeg'
+    },
+    body: JSON.stringify({
+      text: text,
+      model_id: model || DEFAULT_SETTINGS.elevenLabsModel,
+      language_code: 'he',
+      voice_settings: {
+        stability: 1.0,
+        similarity_boost: 0.75
+      }
+    })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail?.message || `ElevenLabs error: ${response.status}`);
+  }
+
+  // Convert audio buffer to base64
+  const arrayBuffer = await response.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < uint8Array.byteLength; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  const base64Audio = btoa(binary);
+
+  // Store in Anki and return filename + audio data for playback
+  const filename = `elevenlabs_${Date.now()}.mp3`;
+  await ankiConnectInvoke('storeMediaFile', {
+    filename: filename,
+    data: base64Audio
+  });
+
+  return { filename, audioData: base64Audio };
+}
+
+async function translateSentence(sentence, apiKey, model) {
   const prompt = `Translate the following Hebrew sentence to English. Provide only the English translation, nothing else:\n\n${sentence}`;
-  return await callClaudeAPI(apiKey, prompt);
+  const { text, usage } = await callClaudeAPI(apiKey, prompt, { model });
+  return { text, cost: calculateClaudeCost(usage, model) };
 }
 
-async function defineWord(sentence, unknownWord, apiKey) {
-  const prompt = `In the following Hebrew sentence:\n\n${sentence}\n\nProvide a brief definition (1-2 sentences) of the Hebrew word "${unknownWord}" in the context of this sentence. Focus on its meaning in this specific context. If the word is a verb, mention the infinitive form. Include transliterations for the word being defined, and the infinitive if mentioned. Do not use markdown formatting. The only formatting you can apply is through HTML tags.`;
-  return await callClaudeAPI(apiKey, prompt);
+const DEFAULT_DEFINE_PROMPT = `Hebrew sentence: {{SENTENCE}}
+
+Define the word "{{WORD}}" as it appears in that sentence.
+
+Use exactly this HTML format — bold each label, each entry on its own line with no blank lines:
+
+<b>TYPE:</b> [part of speech — Verb / Noun / Adjective / Adverb / Preposition / Conjunction / Pronoun / Particle / etc.]
+<b>ROOT:</b> [Hebrew root letters separated by dashes, e.g. פ - ת - ח]
+<b>MEANING:</b> [core meaning(s), including all persons/genders/numbers the form covers where relevant, e.g. "is opened / has been opened"]
+
+If the word is a verb, add these two lines immediately after MEANING:
+<b>TENSE:</b> [Present / Past / Future / Imperative, plus person/gender/number where applicable]
+<b>INFINITIVE:</b> [infinitive form in Hebrew followed by its English meaning in parentheses, e.g. להיפתח (To Be Opened)]
+
+Then always end with:
+<b>CONTEXT:</b> [what the word means specifically in this sentence — emotional, literal, idiomatic, etc.]
+
+If context alone cannot disambiguate between multiple distinct meanings, list each possibility under MEANING before giving the best-guess CONTEXT.
+Output only the formatted definition — no preamble, no explanation.`;
+
+async function defineWord(sentence, unknownWord, apiKey, model, customPrompt) {
+  const template = customPrompt || DEFAULT_DEFINE_PROMPT;
+  const prompt = template
+    .replace(/\{\{SENTENCE\}\}/g, sentence)
+    .replace(/\{\{WORD\}\}/g, unknownWord);
+  const { text, usage } = await callClaudeAPI(apiKey, prompt, { model });
+  return { text, cost: calculateClaudeCost(usage, model) };
 }
 
-async function defineWords(sentence, unknownWords, apiKey) {
+async function defineWords(sentence, unknownWords, apiKey, model, customPrompt) {
   if (!unknownWords || unknownWords.length === 0) {
-    return 'No unknown words to define.';
+    return { text: 'No unknown words to define.', cost: 0 };
   }
 
   if (unknownWords.length === 1) {
-    return await defineWord(sentence, unknownWords[0], apiKey);
+    return await defineWord(sentence, unknownWords[0], apiKey, model, customPrompt);
   }
 
-  const wordList = unknownWords.join(', ');
-  const prompt = `In the following Hebrew sentence:\n\n${sentence}\n\nProvide brief definitions (1-2 sentences each) for these Hebrew words in the context of this sentence: ${wordList}\n\nFor each word, explain its meaning in this specific context. Format your response as a bulleted list with each word followed by its definition. If the word is a verb, mention the infinitive form. Include transliterations for the word being defined, and the infinitive if mentioned. The only formatting you can apply is through HTML tags.`;
-  return await callClaudeAPI(apiKey, prompt);
+  // Multiple words: run each through the single-word prompt and concatenate
+  let combinedText = '';
+  let totalCost = 0;
+  for (const word of unknownWords) {
+    const { text, cost } = await defineWord(sentence, word, apiKey, model, customPrompt);
+    combinedText += (combinedText ? '\n\n' : '') + `<b>${word}</b>\n${text}`;
+    totalCost += cost;
+  }
+  return { text: combinedText, cost: totalCost };
 }
 
-async function generateI1SentencesForWord(targetWord, knownWords, count, apiKey, maxWords = 3000) {
+async function generateI1SentencesForWord(targetWord, knownWords, count, apiKey, maxWords = 3000, model, customPrompt) {
   const sampledWords = await sampleKnownWords(knownWords, maxWords);
 
   const systemMessage = [
@@ -591,28 +777,14 @@ async function generateI1SentencesForWord(targetWord, knownWords, count, apiKey,
     }
   ];
 
-  const userPrompt = `TARGET WORD (unknown to student): ${targetWord}
+  const promptTemplate = customPrompt || DEFAULT_SETTINGS.sentenceGenerationPrompt;
+  const userPrompt = promptTemplate
+    .replace(/\{\{TARGET_WORD\}\}/g, targetWord)
+    .replace(/\{\{COUNT\}\}/g, count);
 
-Generate ${count} natural Hebrew sentences following these rules:
+  const { text, usage } = await callClaudeAPI(apiKey, userPrompt, { system: systemMessage, model });
 
-1. Each sentence MUST contain the exact target word "${targetWord}" with no modifications (No added prefixes/prepositions)
-2. All other words MUST come from the known words list only
-3. You MAY add prefixes/prepositions to known words when grammatically necessary, but not the target word as this should not be modified.
-בבר or הבר or לברthen you should NOT change it to בר For example, if the target word is
-4. Sentences must be natural, grammatically correct Hebrew that native speakers would use
-5. Vary sentence structure, context, and length
-6. Keep sentences simple but meaningful
-
-CRITICAL CONSTRAINTS:
-- Do NOT use any words outside the known words list (except the target word)
-- Do NOT modify the target word itself (no prefixes/suffixes unless the word already has them)
-- Do NOT add explanations, translations, or numbering
-
-OUTPUT FORMAT: Return ONLY ${count} Hebrew sentences, one per line, nothing else.`;
-
-  const response = await callClaudeAPI(apiKey, userPrompt, { system: systemMessage });
-
-  const sentences = response
+  const sentences = text
     .split('\n')
     .map(s => s.trim())
     .filter(s => s.length > 0 && !s.match(/^\d+[\.\)]/))
@@ -620,7 +792,8 @@ OUTPUT FORMAT: Return ONLY ${count} Hebrew sentences, one per line, nothing else
     .filter(s => s.length > 0)
     .slice(0, count);
 
-  return sentences;
+  const cost = calculateClaudeCost(usage, model);
+  return { sentences, cost, usage };
 }
 
 // Dictionary lookup function
@@ -1043,6 +1216,52 @@ const MESSAGE_HANDLERS = {
     return true;
   },
 
+  previewElevenLabsAudio: (request, sender, sendResponse) => {
+    chrome.storage.local.get('settings')
+      .then(async data => {
+        const apiKey = data.settings?.elevenLabsApiKey;
+        if (!apiKey) throw new Error('no_key');
+        const voiceId = data.settings?.elevenLabsVoiceId || DEFAULT_SETTINGS.elevenLabsVoiceId;
+        const elModel = data.settings?.elevenLabsModel || DEFAULT_SETTINGS.elevenLabsModel;
+
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+          method: 'POST',
+          headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json', 'Accept': 'audio/mpeg' },
+          body: JSON.stringify({
+            text: request.text,
+            model_id: elModel,
+            language_code: 'he',
+            voice_settings: { stability: 1.0, similarity_boost: 0.75 }
+          })
+        });
+        if (!response.ok) throw new Error(`ElevenLabs error: ${response.status}`);
+
+        const arrayBuffer = await response.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < uint8Array.byteLength; i++) binary += String.fromCharCode(uint8Array[i]);
+        sendResponse({ success: true, audioData: btoa(binary) });
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  },
+
+  generateElevenLabsAudio: (request, sender, sendResponse) => {
+    chrome.storage.local.get('settings')
+      .then(data => {
+        const apiKey = data.settings?.elevenLabsApiKey;
+        if (!apiKey) {
+          throw new Error('ElevenLabs API key not set. Please add it in the settings.');
+        }
+        const voiceId = data.settings?.elevenLabsVoiceId || DEFAULT_SETTINGS.elevenLabsVoiceId;
+        const elModel = data.settings?.elevenLabsModel || DEFAULT_SETTINGS.elevenLabsModel;
+        return generateElevenLabsAudio(request.text, apiKey, voiceId, elModel);
+      })
+      .then(result => sendResponse({ success: true, filename: result.filename, audioData: result.audioData }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  },
+
   translateSentence: (request, sender, sendResponse) => {
     chrome.storage.local.get('settings')
       .then(data => {
@@ -1050,9 +1269,13 @@ const MESSAGE_HANDLERS = {
         if (!apiKey) {
           throw new Error('Claude API key not set. Please add it in the settings.');
         }
-        return translateSentence(request.sentence, apiKey);
+        const model = data.settings?.claudeModel || DEFAULT_SETTINGS.claudeModel;
+        return translateSentence(request.sentence, apiKey, model);
       })
-      .then(translation => sendResponse({ success: true, result: translation }))
+      .then(async ({ text, cost }) => {
+        await accumulateSpend(cost);
+        sendResponse({ success: true, result: text });
+      })
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   },
@@ -1064,9 +1287,14 @@ const MESSAGE_HANDLERS = {
         if (!apiKey) {
           throw new Error('Claude API key not set. Please add it in the settings.');
         }
-        return defineWord(request.sentence, request.word, apiKey);
+        const model = data.settings?.claudeModel || DEFAULT_SETTINGS.claudeModel;
+        const customPrompt = data.settings?.aiDefinePrompt || null;
+        return defineWord(request.sentence, request.word, apiKey, model, customPrompt);
       })
-      .then(definition => sendResponse({ success: true, result: definition }))
+      .then(async ({ text, cost }) => {
+        await accumulateSpend(cost);
+        sendResponse({ success: true, result: text });
+      })
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   },
@@ -1078,9 +1306,14 @@ const MESSAGE_HANDLERS = {
         if (!apiKey) {
           throw new Error('Claude API key not set. Please add it in the settings.');
         }
-        return defineWords(request.sentence, request.words, apiKey);
+        const model = data.settings?.claudeModel || DEFAULT_SETTINGS.claudeModel;
+        const customPrompt = data.settings?.aiDefinePrompt || null;
+        return defineWords(request.sentence, request.words, apiKey, model, customPrompt);
       })
-      .then(definition => sendResponse({ success: true, result: definition }))
+      .then(async ({ text, cost }) => {
+        await accumulateSpend(cost);
+        sendResponse({ success: true, result: text });
+      })
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   },
@@ -1206,9 +1439,12 @@ const MESSAGE_HANDLERS = {
         }
 
         const maxWords = data.settings?.maxWordsForI1 || 3000;
+        const claudeModel = data.settings?.claudeModel || DEFAULT_SETTINGS.claudeModel;
+        const customPrompt = data.settings?.sentenceGenerationPrompt || DEFAULT_SETTINGS.sentenceGenerationPrompt;
         const words = request.words; // Array of {word, rank} objects
         const sentencesPerWord = request.sentencesPerWord;
         const results = [];
+        let sessionCost = 0;
 
         // Generate sentences for each word
         for (let i = 0; i < words.length; i++) {
@@ -1223,12 +1459,15 @@ const MESSAGE_HANDLERS = {
           });
 
           try {
-            const sentences = await generateI1SentencesForWord(wordData.word, knownWords, sentencesPerWord, apiKey, maxWords);
+            const { sentences, cost, usage } = await generateI1SentencesForWord(wordData.word, knownWords, sentencesPerWord, apiKey, maxWords, claudeModel, customPrompt);
+            sessionCost += cost;
 
             results.push({
               word: wordData.word,
               rank: wordData.rank,
-              sentences: sentences
+              sentences,
+              cost,
+              usage
             });
           } catch (error) {
             console.error(`Error generating sentences for ${wordData.word}:`, error);
@@ -1236,12 +1475,18 @@ const MESSAGE_HANDLERS = {
               word: wordData.word,
               rank: wordData.rank,
               sentences: [],
+              cost: 0,
               error: error.message
             });
           }
         }
 
-        sendResponse({ success: true, data: results });
+        // Accumulate total spend in storage
+        await accumulateSpend(sessionCost);
+        const spendData = await chrome.storage.local.get('claudeSpendTotal');
+        const newTotal = spendData.claudeSpendTotal || 0;
+
+        sendResponse({ success: true, data: results, sessionCost, totalSpend: newTotal });
       } catch (error) {
         console.error('Error generating i+1 sentences:', error);
         sendResponse({ success: false, error: error.message });

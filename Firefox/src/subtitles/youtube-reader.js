@@ -264,39 +264,34 @@
         const isI1 = item.classList.contains('anki-i1-sentence');
         const isPotentiallyI1 = item.classList.contains('anki-potentially-i1-sentence');
 
+        // Border+glow colours matching the design system
+        const i1Color   = { r: 90,  g: 127, b: 255 }; // #5a7fff
+        const pi1Color  = { r: 155, g: 107, b: 255 }; // #9b6bff
+        const activeCol = isI1 ? i1Color : isPotentiallyI1 ? pi1Color : null;
+
         if (i === index) {
-          // Preserve i+1 and potentially-i+1 backgrounds, otherwise use highlight color
-          if (isI1) {
-            item.style.backgroundColor = '#add8e6'; // Light blue
-          } else if (isPotentiallyI1) {
-            item.style.backgroundColor = '#e6d5f5'; // Light purple
+          if (activeCol) {
+            const {r, g, b} = activeCol;
+            item.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.18)`;
+            item.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.75)`;
+            item.style.boxShadow = `0 0 8px rgba(${r}, ${g}, ${b}, 0.25)`;
           } else {
             item.style.backgroundColor = '#4f4f4f';
+            item.style.border = '1px solid transparent';
+            item.style.boxShadow = 'none';
           }
-          item.style.borderLeftColor = '#0066ff'; // Blue
           item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else {
-          // Preserve i+1 and potentially-i+1 backgrounds, otherwise use default color
-          if (isI1) {
-            item.style.backgroundColor = '#add8e6'; // Light blue
-          } else if (isPotentiallyI1) {
-            item.style.backgroundColor = '#e6d5f5'; // Light purple
+          if (activeCol) {
+            const {r, g, b} = activeCol;
+            item.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.12)`;
+            item.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.55)`;
+            item.style.boxShadow = `0 0 6px rgba(${r}, ${g}, ${b}, 0.18)`;
           } else {
-            item.style.backgroundColor = '#272727';
+            item.style.backgroundColor = '#1a1a1a';
+            item.style.border = '1px solid transparent';
+            item.style.boxShadow = 'none';
           }
-          item.style.borderLeftColor = 'transparent';
-        }
-
-        // Maintain text colors for i+1 and potentially-i+1 items
-        if (isI1 || isPotentiallyI1) {
-          const divElements = item.querySelectorAll('div');
-          divElements.forEach(div => {
-            div.style.color = '#000';
-          });
-          const spanElements = item.querySelectorAll('.anki-hebrew-highlight');
-          spanElements.forEach(span => {
-            span.style.color = '#000';
-          });
         }
       });
     }

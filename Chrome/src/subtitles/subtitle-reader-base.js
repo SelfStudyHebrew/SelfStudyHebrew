@@ -95,7 +95,7 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 10000;
-      background: rgba(0, 0, 0, 0.85);
+      background: #000;
       color: white;
       padding: 10px 20px;
       border-radius: 4px;
@@ -195,15 +195,17 @@
       position: fixed;
       top: 0;
       right: 0;
-      width: 350px;
+      width: 360px;
       height: 100vh;
-      background: #0f0f0f;
-      color: white;
+      background: #0b0b10;
+      color: #ededf5;
       z-index: 9998;
       overflow-y: auto;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      box-shadow: -2px 0 10px rgba(0,0,0,0.5);
-      border-left: 1px solid #333;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.04);
+      border-left: 1px solid #2c2c3e;
+      scrollbar-width: thin;
+      scrollbar-color: #2c2c3e transparent;
     `;
 
     // Create header
@@ -211,75 +213,89 @@
     header.style.cssText = `
       position: sticky;
       top: 0;
-      background: #0f0f0f;
-      padding: 20px 20px 15px 20px;
-      border-bottom: 2px solid #333;
+      background: #0b0b10;
+      padding: 14px 16px 12px;
+      border-bottom: 1px solid #2c2c3e;
       z-index: 10;
     `;
+
+    // Gradient accent bar at top
+    const accentBar = document.createElement('div');
+    accentBar.style.cssText = `
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #5a7fff, #9b6bff 60%, transparent);
+    `;
+    header.appendChild(accentBar);
 
     // Title
     const title = document.createElement('div');
     title.textContent = `${this.platformName} Hebrew Subtitles`;
     title.style.cssText = `
-      font-size: 18px;
-      font-weight: 600;
+      font-size: 15px;
+      font-weight: 700;
       margin-bottom: 12px;
-      color: white;
+      color: #ededf5;
+      letter-spacing: -0.2px;
     `;
     header.appendChild(title);
 
     // Comprehension stats
     const statsContainer = document.createElement('div');
     statsContainer.style.cssText = `
-      background: #1a1a1a;
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 12px;
+      background: #13131a;
+      border: 1px solid #2c2c3e;
+      padding: 12px 14px;
+      border-radius: 10px;
+      margin-bottom: 10px;
     `;
 
     const percentageDiv = document.createElement('div');
     percentageDiv.style.cssText = `
-      font-size: 32px;
+      font-size: 30px;
       font-weight: 700;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
+      line-height: 1.2;
     `;
     percentageDiv.id = `${browserId}-percentage`;
     percentageDiv.textContent = '0%';
 
     const statsDetail = document.createElement('div');
     statsDetail.style.cssText = `
-      font-size: 13px;
-      color: #aaa;
+      font-size: 12.5px;
+      color: #8f8fa8;
     `;
     statsDetail.id = `${browserId}-stats-detail`;
     statsDetail.textContent = '(0 / 0 words)';
 
     const i1Count = document.createElement('div');
     i1Count.style.cssText = `
-      font-size: 14px;
-      color: #aaa;
+      font-size: 12.5px;
+      color: #5a7fff;
       margin-top: 6px;
+      font-weight: 500;
     `;
     i1Count.id = `${browserId}-i1-count`;
     i1Count.textContent = '📚 0 i+1 sentences';
 
     const potentiallyKnownCount = document.createElement('div');
     potentiallyKnownCount.style.cssText = `
-      font-size: 13px;
-      color: #9370db;
-      margin-top: 4px;
+      font-size: 12px;
+      color: #9b6bff;
+      margin-top: 3px;
     `;
     potentiallyKnownCount.id = `${browserId}-potentially-known-count`;
-    potentiallyKnownCount.textContent = '🟣 0 potentially known';
+    potentiallyKnownCount.textContent = '◉ 0 potentially known';
 
     const potentiallyI1Count = document.createElement('div');
     potentiallyI1Count.style.cssText = `
-      font-size: 13px;
-      color: #9370db;
+      font-size: 12px;
+      color: #9b6bff;
       margin-top: 2px;
     `;
     potentiallyI1Count.id = `${browserId}-potentially-i1-count`;
-    potentiallyI1Count.textContent = '🟣 0 potentially i+1';
+    potentiallyI1Count.textContent = '◉ 0 potentially i+1';
 
     statsContainer.appendChild(percentageDiv);
     statsContainer.appendChild(statsDetail);
@@ -294,31 +310,35 @@
     toggleBtn.style.cssText = `
       width: 100%;
       padding: 8px;
-      background: #0066ff;
-      color: white;
-      border: none;
-      border-radius: 4px;
+      background: #21212e;
+      color: #ededf5;
+      border: 1px solid #2c2c3e;
+      border-radius: 6px;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 500;
+      transition: background 0.15s ease;
     `;
+    toggleBtn.addEventListener('mouseenter', () => { toggleBtn.style.background = '#28283a'; });
+    toggleBtn.addEventListener('mouseleave', () => { toggleBtn.style.background = '#21212e'; });
+
     // Create show button (initially hidden)
     const showBtn = document.createElement('button');
-    showBtn.textContent = '📖 Show Sub Browser';
+    showBtn.textContent = '📖 Subtitles';
     showBtn.style.cssText = `
       position: fixed;
       top: 100px;
       right: 20px;
-      padding: 12px 16px;
-      background: #0066ff;
+      padding: 10px 14px;
+      background: #5a7fff;
       color: white;
       border: none;
-      border-radius: 6px;
+      border-radius: 8px;
       cursor: move;
-      font-size: 14px;
+      font-size: 13px;
       font-weight: 600;
       z-index: 9999;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      box-shadow: 0 4px 16px rgba(90,127,255,0.40);
       display: none;
       user-select: none;
     `;
@@ -389,8 +409,36 @@
     const container = document.createElement('div');
     container.id = `${browserId}-list`;
     container.style.cssText = `
-      padding: 10px;
+      padding: 10px 12px 16px;
     `;
+
+    // Loading state — replaced by populateSubtitleBrowser when ready
+    container.innerHTML = `
+      <div data-ssh-loading style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:48px 16px;gap:16px;">
+        <div style="
+          width:36px;height:36px;
+          border:3px solid #2c2c3e;
+          border-top-color:#5a7fff;
+          border-radius:50%;
+          animation:ssh-spin 0.8s linear infinite;
+        "></div>
+        <div style="color:#5a5a72;font-size:13px;">Loading subtitles…</div>
+      </div>
+      <style>@keyframes ssh-spin{to{transform:rotate(360deg)}}</style>
+    `;
+
+    // After 10s, if still loading, show a hint
+    setTimeout(() => {
+      const loadingEl = container.querySelector('[data-ssh-loading]');
+      if (loadingEl) {
+        loadingEl.innerHTML = `
+          <div style="font-size:28px;margin-bottom:4px;">⚠️</div>
+          <div style="color:#ededf5;font-size:14px;font-weight:600;margin-bottom:6px;">Subtitles not found</div>
+          <div style="color:#5a5a72;font-size:12px;text-align:center;line-height:1.5;">Try refreshing the page.<br>Make sure Hebrew subtitles<br>are available for this title.</div>
+        `;
+      }
+    }, 10000);
+
     browser.appendChild(container);
 
     // If we're in an iframe, try to append to parent document
@@ -413,16 +461,18 @@
         top: 80px;
         right: 20px;
         bottom: 100px;
-        width: 350px;
+        width: 360px;
         height: auto;
-        background: rgba(15, 15, 15, 0.95);
-        color: white;
+        background: #0b0b10;
+        color: #ededf5;
         z-index: 2147483647;
         overflow-y: auto;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.8);
-        border-radius: 8px;
-        border: 2px solid #333;
+        box-shadow: 0 8px 40px rgba(0,0,0,0.85), 0 0 0 1px rgba(255,255,255,0.05);
+        border-radius: 14px;
+        border: 1px solid #2c2c3e;
+        scrollbar-width: thin;
+        scrollbar-color: #2c2c3e transparent;
       `;
 
       document.body.appendChild(browser);
@@ -430,6 +480,7 @@
     }
 
     this.subtitleBrowser = browser;
+    this.subtitleList = container; // Direct reference — avoids ID collision with old readers
     return browser;
   }
 
@@ -467,11 +518,11 @@
     }
 
     if (potentiallyKnownText) {
-      potentiallyKnownText.textContent = `🟣 ${this.comprehensionStats.potentiallyKnown || 0} potentially known`;
+      potentiallyKnownText.textContent = `◉ ${this.comprehensionStats.potentiallyKnown || 0} potentially known`;
     }
 
     if (potentiallyI1Text) {
-      potentiallyI1Text.textContent = `🟣 ${this.comprehensionStats.potentiallyI1Sentences || 0} potentially i+1`;
+      potentiallyI1Text.textContent = `◉ ${this.comprehensionStats.potentiallyI1Sentences || 0} potentially i+1`;
     }
   }
 
@@ -485,18 +536,16 @@
       return;
     }
 
-    let browserId;
-    if (this.platformName === 'YouTube') {
-      browserId = window.DOM_IDS.YOUTUBE_BROWSER;
-    } else if (this.platformName === 'Netflix') {
-      browserId = window.DOM_IDS.NETFLIX_BROWSER;
-    } else if (this.platformName === 'StreamIsrael') {
-      browserId = window.DOM_IDS.STREAMISRAEL_BROWSER;
-    }
-
-    const container = document.getElementById(`${browserId}-list`);
+    // Use direct reference to avoid ID collision when multiple readers exist (SPA navigation)
+    const container = this.subtitleList || (() => {
+      let browserId;
+      if (this.platformName === 'YouTube') browserId = window.DOM_IDS.YOUTUBE_BROWSER;
+      else if (this.platformName === 'Netflix') browserId = window.DOM_IDS.NETFLIX_BROWSER;
+      else if (this.platformName === 'StreamIsrael') browserId = window.DOM_IDS.STREAMISRAEL_BROWSER;
+      return document.getElementById(`${browserId}-list`);
+    })();
     if (!container) {
-      console.log(`[${this.platformName} Subs] Container ${browserId}-list not found, aborting`);
+      console.log(`[${this.platformName} Subs] Container not found, aborting`);
       return;
     }
 
@@ -505,7 +554,6 @@
     const matureWords = storage.matureWords || [];
     const learningWords = storage.learningWords || [];
     const sentenceHighlightEnabled = storage.settings?.sentenceHighlightEnabled !== false;
-    const sentenceColor = storage.settings?.sentenceColor || '#add8e6';
 
     container.innerHTML = '';
 
@@ -517,26 +565,41 @@
       const isI1Sentence = sentenceHighlightEnabled && window.checkIfI1Sentence(sub.text, matureWords, learningWords);
       const isPotentiallyI1Sentence = sentenceHighlightEnabled && !isI1Sentence && window.checkIfPotentiallyI1Sentence(sub.text, matureWords, learningWords);
 
+      // Dark-theme appropriate colours for i+1 items
+      let backgroundColor = '#13131a';
+      let borderColor = '#2c2c3e';
+      let borderLeftAccent = 'transparent';
+      if (isI1Sentence) {
+        backgroundColor = 'rgba(90,127,255,0.10)';
+        borderColor = 'rgba(90,127,255,0.30)';
+        borderLeftAccent = '#5a7fff';
+      } else if (isPotentiallyI1Sentence) {
+        backgroundColor = 'rgba(155,107,255,0.10)';
+        borderColor = 'rgba(155,107,255,0.28)';
+        borderLeftAccent = '#9b6bff';
+      }
+
+      // Use inset box-shadow for left accent — avoids any border-width conflicts
+      const accentShadow = borderLeftAccent !== 'transparent'
+        ? `inset 3px 0 0 ${borderLeftAccent}`
+        : 'none';
+
       item.style.cssText = `
-        padding: 10px;
-        margin-bottom: 8px;
-        border-radius: 4px;
+        padding: 10px 12px;
+        margin-bottom: 6px;
+        border-radius: 8px;
         cursor: pointer;
-        border: 2px solid transparent;
-        transition: border-color 0.2s;
+        background: ${backgroundColor};
+        border: 1px solid ${borderColor};
+        box-shadow: ${accentShadow};
+        transition: border-color 0.15s ease, background 0.15s ease;
       `;
 
-      // Set background color separately to ensure it applies
-      let backgroundColor = '#1a1a1a';
-      if (isI1Sentence) {
-        backgroundColor = sentenceColor;  // Light blue
-      } else if (isPotentiallyI1Sentence) {
-        backgroundColor = '#e6d5f5';  // Light purple
-      }
-      item.style.backgroundColor = backgroundColor;
-
-      // Store sentence text for card creation
+      // Store colours for restore on mouseleave/deactivate
       item.dataset.ankiSentence = sub.text;
+      item.dataset.bgColor = backgroundColor;
+      item.dataset.borderColor = borderColor;
+      item.dataset.accentShadow = accentShadow;
 
       // Mark i+1 and potentially-i+1 sentences and set appropriate tooltip
       if (isI1Sentence) {
@@ -549,15 +612,6 @@
         item.title = 'Click to seek | Shift+Click to create Anki card';
       }
 
-      item.addEventListener('mouseenter', () => {
-        item.style.borderColor = '#0066ff';
-      });
-
-      item.addEventListener('mouseleave', () => {
-        if (parseInt(item.dataset.index) !== this.currentSubtitleIndex) {
-          item.style.borderColor = 'transparent';
-        }
-      });
 
       // Add click handlers
       item.addEventListener('click', async (e) => {
@@ -603,25 +657,64 @@
       // Timestamp
       const timestamp = document.createElement('div');
       timestamp.textContent = window.formatTimestamp(sub.startTime, sub.endTime);
-      const timestampColor = (isI1Sentence || isPotentiallyI1Sentence) ? '#000' : '#aaa';
       timestamp.style.cssText = `
-        font-size: 12px;
-        color: ${timestampColor};
-        margin-bottom: 6px;
+        font-size: 11.5px;
+        color: #5a5a72;
+        margin-bottom: 5px;
+        font-variant-numeric: tabular-nums;
       `;
       item.appendChild(timestamp);
 
-      // Text
+      // Text with word highlighting
       const text = document.createElement('div');
       const displayText = window.stripNikud(sub.text, this.stripNikudEnabled);
-      text.textContent = displayText;
-      const textColor = (isI1Sentence || isPotentiallyI1Sentence) ? '#000' : 'inherit';
       text.style.cssText = `
-        font-size: 24px;
+        font-size: 22px;
         direction: rtl;
         line-height: 1.4;
-        color: ${textColor};
+        color: #ededf5;
       `;
+
+      // Highlight Hebrew words with underline colors
+      const hebrewRegex = /[֐-׿]+/g;
+      const underlineColors = {
+        'mature': '#2d5016',
+        'learning': '#ff8c00',
+        'potentially-known': '#9370db',
+        'unknown': '#dc3545'
+      };
+      const wordTitles = {
+        'mature': 'Mature card',
+        'learning': 'Learning card',
+        'potentially-known': 'Potentially known (prefix detected)',
+        'unknown': 'Unknown word'
+      };
+
+      let wordMatch;
+      let lastIdx = 0;
+      const fragment = document.createDocumentFragment();
+      hebrewRegex.lastIndex = 0;
+      while ((wordMatch = hebrewRegex.exec(displayText)) !== null) {
+        if (wordMatch.index > lastIdx) {
+          fragment.appendChild(document.createTextNode(displayText.substring(lastIdx, wordMatch.index)));
+        }
+        const wordType = window.getWordType(window.normalizeHebrew(wordMatch[0]), matureWords, learningWords);
+        const span = document.createElement('span');
+        span.textContent = wordMatch[0];
+        span.className = `anki-hebrew-highlight anki-${wordType}`;
+        span.style.textDecoration = 'underline';
+        span.style.textDecorationColor = underlineColors[wordType] || '#dc3545';
+        span.style.textDecorationThickness = '2px';
+        span.style.color = 'inherit';
+        span.title = wordTitles[wordType] || 'Unknown word';
+        fragment.appendChild(span);
+        lastIdx = wordMatch.index + wordMatch[0].length;
+      }
+      if (lastIdx < displayText.length) {
+        fragment.appendChild(document.createTextNode(displayText.substring(lastIdx)));
+      }
+      text.appendChild(fragment);
+
       item.appendChild(text);
 
       container.appendChild(item);
@@ -676,7 +769,7 @@
 
           // Hide, reset styles, update text
           this.subtitleOverlay.style.display = 'none';
-          this.subtitleOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+          this.subtitleOverlay.style.backgroundColor = '#000';
           this.subtitleOverlay.style.color = 'white';
           this.subtitleOverlay.style.padding = '10px 20px';
           this.subtitleOverlay.classList.remove('anki-sentence-highlight');
@@ -719,40 +812,12 @@
             const isPotentiallyI1 = item.classList.contains('anki-potentially-i1-sentence');
 
             if (i === foundIndex) {
-              item.style.borderColor = '#0066ff';
-              // Set appropriate background: i+1 stays light blue, potentially-i+1 stays purple, others get gray
-              if (isI1) {
-                item.style.backgroundColor = '#add8e6'; // Light blue
-              } else if (isPotentiallyI1) {
-                item.style.backgroundColor = '#e6d5f5'; // Light purple
-              } else {
-                item.style.backgroundColor = '#272727';
-              }
+              item.style.borderColor = '#5a7fff';
+              if (!isI1 && !isPotentiallyI1) item.style.background = '#1a1a24';
               item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
-              item.style.borderColor = 'transparent';
-              // Set appropriate background: i+1 stays light blue, potentially-i+1 stays purple, others get dark
-              if (isI1) {
-                item.style.backgroundColor = '#add8e6'; // Light blue
-              } else if (isPotentiallyI1) {
-                item.style.backgroundColor = '#e6d5f5'; // Light purple
-              } else {
-                item.style.backgroundColor = '#1a1a1a';
-              }
-            }
-
-            // Maintain text colors for i+1 and potentially-i+1 items
-            if (isI1 || isPotentiallyI1) {
-              // Set color on the divs (for timestamp and non-highlighted text)
-              const divElements = item.querySelectorAll('div');
-              divElements.forEach(div => {
-                div.style.color = '#000'; // Black text
-              });
-              // Set color on the word highlight spans (they have color: inherit)
-              const spanElements = item.querySelectorAll('.anki-hebrew-highlight');
-              spanElements.forEach(span => {
-                span.style.color = '#000'; // Black text for word highlights
-              });
+              item.style.borderColor = item.dataset.borderColor;
+              item.style.background = item.dataset.bgColor;
             }
           });
         }

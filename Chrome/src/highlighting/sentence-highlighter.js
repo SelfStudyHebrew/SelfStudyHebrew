@@ -3,6 +3,19 @@
 (function() {
   'use strict';
 
+  /**
+   * Convert a hex colour string to rgba()
+   * @param {string} hex - e.g. '#5a7fff'
+   * @param {number} alpha - 0–1
+   * @returns {string} e.g. 'rgba(90, 127, 255, 0.12)'
+   */
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
   const SPECIAL_CONTAINER_IDS = [
     'YOUTUBE_OVERLAY', 'NETFLIX_OVERLAY', 'STREAMISRAEL_OVERLAY',
     'YOUTUBE_BROWSER', 'NETFLIX_BROWSER', 'STREAMISRAEL_BROWSER'
@@ -46,22 +59,27 @@
    * @param {string} sentenceText - Sentence text to store
    */
   function highlightSentenceElement(element, color, sentenceText) {
-    element.style.backgroundColor = color;
+    // Check if we're in a subtitle overlay or browser
+    const isInSubtitleOverlay = element.closest(`#${window.DOM_IDS.YOUTUBE_OVERLAY}, #${window.DOM_IDS.NETFLIX_OVERLAY}, #${window.DOM_IDS.STREAMISRAEL_OVERLAY}`);
+    const isInSubtitleBrowser = element.closest(`#${window.DOM_IDS.YOUTUBE_BROWSER}, #${window.DOM_IDS.NETFLIX_BROWSER}, #${window.DOM_IDS.STREAMISRAEL_BROWSER}`);
 
-    // Check if we're in a subtitle overlay or browser and set appropriate text color
-    const isInSubtitleOverlay = element.closest(`#${window.DOM_IDS.YOUTUBE_OVERLAY}, #${window.DOM_IDS.NETFLIX_OVERLAY}`);
-    const isInSubtitleBrowser = element.closest(`#${window.DOM_IDS.YOUTUBE_BROWSER}, #${window.DOM_IDS.NETFLIX_BROWSER}`);
-
-    if (isInSubtitleOverlay) {
-      element.style.color = 'white'; // White text for video overlay
-    } else if (isInSubtitleBrowser) {
-      element.style.color = 'black'; // Black text for sidebar browser (better contrast)
+    if (isInSubtitleBrowser) {
+      // Background and text colour already set by populateSubtitleBrowser — don't override.
+      // Just ensure text stays readable on the dark background.
+      element.style.color = '#ededf5';
     } else {
-      element.style.color = 'black'; // Black text for regular pages (fixes dark mode visibility)
+      // Border + subtle fill style (dark-friendly, works on any page background)
+      element.style.backgroundColor = hexToRgba(color, 0.12);
+      element.style.border = `1px solid ${hexToRgba(color, 0.55)}`;
+      element.style.boxShadow = `0 0 6px ${hexToRgba(color, 0.18)}`;
+      element.style.borderRadius = '3px';
+      element.style.padding = '1px 4px';
+      if (isInSubtitleOverlay) {
+        element.style.color = 'white';
+      }
+      // Don't override text colour on regular pages — keep whatever the page uses
     }
 
-    element.style.borderRadius = '3px';
-    element.style.padding = '2px 4px';
     element.classList.add(window.CSS_CLASSES.SENTENCE_HIGHLIGHT);
     element.title = 'Shift+click to create Anki card';
     // Store the full sentence text for retrieval on click
@@ -78,7 +96,7 @@
    * @param {string} potentiallyI1Color - Color for potentially-i+1 sentence highlights
    * @returns {Object} {i1Count, potentiallyI1Count}
    */
-  function highlightSentences(matureWords, learningWords, sentenceColor, potentiallyI1Color = '#e6d5f5') {
+  function highlightSentences(matureWords, learningWords, sentenceColor, potentiallyI1Color = '#9b6bff') {
     const body = document.body;
     if (!body) return {i1Count: 0, potentiallyI1Count: 0};
 
@@ -292,21 +310,22 @@
                                    sentenceSpans[0].span.closest(`#${window.DOM_IDS.YOUTUBE_BROWSER}, #${window.DOM_IDS.NETFLIX_BROWSER}`);
 
       sentenceSpans.forEach(sm => {
-        sm.span.style.backgroundColor = sentenceColor;
-
-        if (isInSubtitleOverlay) {
-          sm.span.style.color = 'white'; // White text for video overlay
-        } else if (isInSubtitleBrowser) {
-          sm.span.style.color = 'black'; // Black text for sidebar browser (better contrast with blue)
-        } else {
-          sm.span.style.color = 'black'; // Black text for regular pages (fixes dark mode visibility)
+        if (isInSubtitleBrowser) {
+          // Background already set by populateSubtitleBrowser — don't override
+          sm.span.style.color = '#ededf5';
+          sm.span.classList.add(window.CSS_CLASSES.SENTENCE_HIGHLIGHT);
+          sm.span.dataset.ankiSentence = sentence.text;
+          return;
         }
 
+        sm.span.style.backgroundColor = hexToRgba(sentenceColor, 0.12);
+        sm.span.style.border = `1px solid ${hexToRgba(sentenceColor, 0.55)}`;
+        sm.span.style.boxShadow = `0 0 6px ${hexToRgba(sentenceColor, 0.18)}`;
         sm.span.style.borderRadius = '3px';
-        sm.span.style.padding = '2px 4px';
+        sm.span.style.padding = '1px 4px';
+        if (isInSubtitleOverlay) sm.span.style.color = 'white';
         sm.span.classList.add(window.CSS_CLASSES.SENTENCE_HIGHLIGHT);
         sm.span.title = 'Shift+click to create Anki card';
-        // Store the full sentence text for retrieval on click
         sm.span.dataset.ankiSentence = sentence.text;
       });
     });
@@ -326,6 +345,8 @@
       if (element.classList.contains(window.CSS_CLASSES.WORD_HIGHLIGHT)) {
         // This is a word span with sentence highlighting - only remove sentence styles
         element.style.backgroundColor = '';
+        element.style.border = '';
+        element.style.boxShadow = '';
         element.style.padding = '';
         element.style.color = '';
         element.classList.remove(window.CSS_CLASSES.SENTENCE_HIGHLIGHT);
@@ -335,6 +356,8 @@
       } else {
         // This is a standalone sentence highlight element
         element.style.backgroundColor = '';
+        element.style.border = '';
+        element.style.boxShadow = '';
         element.style.borderRadius = '';
         element.style.padding = '';
         element.style.color = '';
