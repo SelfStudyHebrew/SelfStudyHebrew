@@ -44,6 +44,15 @@
       </div>
 
       <div class="setting-item">
+        <label>ElevenLabs Character Usage</label>
+        <div id="elevenlabs-usage-display" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+          <span style="font-size:22px;font-weight:700;" id="elevenlabs-usage-text">—</span>
+          <button type="button" id="refresh-elevenlabs-btn" style="font-size:12px;padding:4px 10px;">Refresh</button>
+        </div>
+        <p class="description" id="elevenlabs-usage-desc">Characters used this billing period. Save your ElevenLabs API key first, then click Refresh.</p>
+      </div>
+
+      <div class="setting-item">
         <label for="elevenlabs-api-key">ElevenLabs API Key</label>
         <input type="password" id="elevenlabs-api-key" value="" placeholder="sk_...">
         <p class="description">Your ElevenLabs API key for generating Hebrew audio on Anki cards. Get one at <a href="https://elevenlabs.io/" target="_blank">elevenlabs.io</a></p>
@@ -52,13 +61,41 @@
       <div class="setting-item">
         <label for="elevenlabs-voice-id">ElevenLabs Voice ID</label>
         <input type="text" id="elevenlabs-voice-id" value="Jrq4GqCKqYpigdQsZRkP" placeholder="Jrq4GqCKqYpigdQsZRkP">
-        <p class="description">Voice ID to use for TTS. Find IDs at <a href="https://elevenlabs.io/voice-library" target="_blank">elevenlabs.io/voice-library</a></p>
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <button type="button" class="voice-preset-btn" data-voice-id="Jrq4GqCKqYpigdQsZRkP" style="font-size:12px;padding:3px 10px;cursor:pointer;">Anatole (Masc)</button>
+          <button type="button" class="voice-preset-btn" data-voice-id="MpbYQvoTmXjHkaxtLiSh" style="font-size:12px;padding:3px 10px;cursor:pointer;">Anet (Fem)</button>
+        </div>
+        <p class="description">Voice ID to use for TTS. Click a preset above or find more IDs at <a href="https://elevenlabs.io/voice-library" target="_blank">elevenlabs.io/voice-library</a></p>
       </div>
 
       <div class="setting-item">
         <label for="elevenlabs-model">ElevenLabs Model</label>
         <input type="text" id="elevenlabs-model" value="eleven_v3" placeholder="eleven_v3">
         <p class="description">ElevenLabs TTS model ID. See available models at <a href="https://elevenlabs.io/docs/models" target="_blank">elevenlabs.io/docs/models</a>. Note: Hebrew is only supported in <strong>eleven_v3</strong>.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="gemini-api-key">Gemini API Key (Image Generation — Paid)</label>
+        <input type="password" id="gemini-api-key" value="" placeholder="AIza...">
+        <p class="description">Google Gemini API key for AI image generation. Note: image generation has no free tier — billing must be enabled at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a>. ~$0.05/image.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="cloudflare-account-id">Cloudflare Account ID (Image Generation — Free)</label>
+        <input type="password" id="cloudflare-account-id" value="" placeholder="abc123...">
+        <p class="description">Your Cloudflare Account ID for free AI image generation (Flux Schnell, ~50–100 images/day free). Find it at <a href="https://dash.cloudflare.com/" target="_blank">dash.cloudflare.com</a> → right sidebar.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="cloudflare-api-token">Cloudflare API Token</label>
+        <input type="password" id="cloudflare-api-token" value="" placeholder="...">
+        <p class="description">Create a token at <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank">dash.cloudflare.com/profile/api-tokens</a> with <strong>Account &gt; Workers AI &gt; Read</strong> permission.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="cloudflare-image-model">Cloudflare Image Model</label>
+        <input type="text" id="cloudflare-image-model" value="" placeholder="@cf/black-forest-labs/flux-1-schnell">
+        <p class="description">Workers AI model for image generation. Leave blank to use the default. Free models (Cloudflare-hosted): <code>@cf/black-forest-labs/flux-1-schnell</code> (default, fast), <code>@cf/bytedance/stable-diffusion-xl-lightning</code>, <code>@cf/lykon/dreamshaper-8-lcm</code>, <code>@cf/stabilityai/stable-diffusion-xl-base-1.0</code>. Partner-tagged models may incur extra charges. <a href="https://developers.cloudflare.com/workers-ai/models/?tasks=Text-to-Image" target="_blank">Browse all models</a>.</p>
       </div>
 
       <div class="setting-item">
@@ -105,6 +142,12 @@
         <label for="audio-field-name">Audio Field Name</label>
         <input type="text" id="audio-field-name" value="Audio" placeholder="Audio">
         <p class="description">Field name for storing subtitle audio recordings (leave empty to disable audio recording)</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="image-field-name">Image Field Name</label>
+        <input type="text" id="image-field-name" value="Image" placeholder="Image">
+        <p class="description">Field name that shows the image search panel in the card creator (leave empty to disable image search)</p>
       </div>
     </div>
 
@@ -200,8 +243,9 @@
         <strong>This will create:</strong>
         <ul style="margin: 8px 0; padding-left: 20px;">
           <li><strong>Already Known</strong> deck - for marking words you already know</li>
+          <li><strong>Ignored</strong> deck - for words to exclude from highlighting and i+1 detection</li>
           <li><strong>Sentence Mining</strong> deck - for storing sentences from subtitles</li>
-          <li><strong>SelfStudyHebrew</strong> note type - with fields: Hebrew, English, Notes, Audio</li>
+          <li><strong>SelfStudyHebrew</strong> note type - with fields: Hebrew, English, Notes, Audio, Image</li>
         </ul>
         <p style="margin: 5px 0 0 0; color: #888; font-size: 13px;">If they already exist, they won't be modified.</p>
       </div>

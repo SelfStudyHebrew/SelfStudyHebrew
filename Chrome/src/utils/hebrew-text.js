@@ -86,7 +86,10 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {string} 'known', 'potentially-known', or 'unknown'
    */
-  function getWordKnownType(normalizedWord, matureWords, learningWords) {
+  function getWordKnownType(normalizedWord, matureWords, learningWords, ignoredWords = []) {
+    // Ignored words are treated as skipped — not unknown — for i+1 purposes
+    if (ignoredWords.length > 0 && ignoredWords.includes(normalizedWord)) return 'ignored';
+
     if (matureWords.includes(normalizedWord) || learningWords.includes(normalizedWord)) {
       return 'known';
     }
@@ -115,9 +118,9 @@
    * Check if normalized Hebrew word is known (in matureWords or learningWords)
    * Also checks if stripping vav (ו) prefix makes it known
    */
-  function isWordKnown(normalizedWord, matureWords, learningWords) {
-    const type = getWordKnownType(normalizedWord, matureWords, learningWords);
-    return type === 'known';
+  function isWordKnown(normalizedWord, matureWords, learningWords, ignoredWords = []) {
+    const type = getWordKnownType(normalizedWord, matureWords, learningWords, ignoredWords);
+    return type === 'known' || type === 'ignored';
   }
 
   // Expose to global scope

@@ -10,11 +10,16 @@ const DEFAULT_SETTINGS = {
   claudeApiKey: '',  // Claude API key for AI features
   claudeModel: 'claude-sonnet-4-6',  // Claude model ID for AI features
   elevenLabsApiKey: '',  // ElevenLabs API key for TTS audio generation
+  geminiApiKey: '',  // Google Gemini API key for AI image generation
+  cloudflareAccountId: '',  // Cloudflare Account ID for free AI image generation
+  cloudflareApiToken: '',  // Cloudflare API Token (Workers AI:Run permission)
+  cloudflareImageModel: '@cf/black-forest-labs/flux-1-schnell',  // Cloudflare Workers AI image model
   elevenLabsVoiceId: 'Jrq4GqCKqYpigdQsZRkP',  // Default voice (Anatole)
   elevenLabsModel: 'eleven_v3',  // ElevenLabs TTS model ID
   defaultDeck: 'Sentence Mining',  // Default deck for card creation
   defaultNoteType: 'SelfStudyHebrew',  // Default note type for card creation
   audioFieldName: 'Audio',  // Field name for subtitle audio recordings
+  imageFieldName: 'Image',  // Field name for image search
   autoExportEnabled: true,  // Auto-export custom definitions on change
   autoExportFilename: 'selfstudyhebrew-custom-definitions.json',  // Filename for auto-export
   maxWordsForI1: 3000,  // Max known words to send for i+1 generation (top frequent + random sampling)
@@ -278,6 +283,13 @@ async function setupAnkiForSelfStudyHebrew() {
       console.log('Already Known deck already exists');
     }
 
+    if (!existingDecks.includes('Ignored')) {
+      await ankiConnectInvoke('createDeck', { deck: 'Ignored' });
+      console.log('✓ Created Ignored deck');
+    } else {
+      console.log('Ignored deck already exists');
+    }
+
     if (!existingDecks.includes('Sentence Mining')) {
       await ankiConnectInvoke('createDeck', { deck: 'Sentence Mining' });
       console.log('✓ Created Sentence Mining deck');
@@ -383,6 +395,20 @@ async function setupAnkiForSelfStudyHebrew() {
         margin-top: 20px;
       }
 
+      .image-wrap {
+        margin-top: 20px;
+        display: flex;
+        justify-content: center;
+      }
+
+      .image-wrap img {
+        max-width: 100%;
+        max-height: 260px;
+        border-radius: 8px;
+        border: 1px solid #2c2c3e;
+        object-fit: contain;
+      }
+
       /* Night mode — already dark, so no changes needed */
       .night_mode .card {
         background-color: #0b0b10;
@@ -406,6 +432,10 @@ async function setupAnkiForSelfStudyHebrew() {
   {{/Notes}}
 
   <div class="audio-wrap">{{Audio}}</div>
+
+  {{#Image}}
+  <div class="image-wrap">{{Image}}</div>
+  {{/Image}}
 </div>`;
 
     const existingModels = await ankiConnectInvoke('modelNames');
@@ -413,7 +443,7 @@ async function setupAnkiForSelfStudyHebrew() {
     if (!existingModels.includes('SelfStudyHebrew')) {
       await ankiConnectInvoke('createModel', {
         modelName: 'SelfStudyHebrew',
-        inOrderFields: ['Hebrew', 'English', 'Notes', 'Audio'],
+        inOrderFields: ['Hebrew', 'English', 'Notes', 'Audio', 'Image'],
         css: SSH_CSS,
         cardTemplates: [{ Name: 'Card 1', Front: SSH_FRONT, Back: SSH_BACK }]
       });
@@ -429,12 +459,22 @@ async function setupAnkiForSelfStudyHebrew() {
           templates: { 'Card 1': { Front: SSH_FRONT, Back: SSH_BACK } }
         }
       });
+      // Add Image field if it doesn't exist yet
+      const existingFields = await ankiConnectInvoke('modelFieldNames', { modelName: 'SelfStudyHebrew' });
+      if (!existingFields.includes('Image')) {
+        await ankiConnectInvoke('modelFieldAdd', {
+          modelName: 'SelfStudyHebrew',
+          fieldName: 'Image',
+          index: existingFields.length
+        });
+        console.log('✓ Added Image field to SelfStudyHebrew note type');
+      }
       console.log('✓ Updated SelfStudyHebrew note type');
     }
 
     return {
       success: true,
-      message: 'Setup completed! Created: Already Known deck, Sentence Mining deck with SelfStudyHebrew preset (5 new/day, 9999 reviews/day), and SelfStudyHebrew note type.\n\nNote: Please manually enable FSRS in Anki (Sentence Mining → Options → Enable FSRS toggle, set retention to 85%).'
+      message: 'Setup completed! Created: Already Known deck, Ignored deck, Sentence Mining deck with SelfStudyHebrew preset (5 new/day, 9999 reviews/day), and SelfStudyHebrew note type.\n\nNote: Please manually enable FSRS in Anki (Sentence Mining → Options → Enable FSRS toggle, set retention to 85%).'
     };
   } catch (error) {
     console.error('Error setting up Anki:', error);
@@ -559,18 +599,52 @@ async function fetchHebrewWords() {
       console.warn('Could not fetch Already Known deck (deck may not exist yet):', error.message);
     }
 
+    // Fetch Ignored deck — remove from mature/learning and store separately
+    const ignoredWords = new Set();
+    try {
+      const ignoredQuery = `deck:"Ignored" ${fieldName}:*`;
+      const ignoredCardIds = await ankiConnectInvoke('findCards', { query: ignoredQuery });
+
+      if (ignoredCardIds && ignoredCardIds.length > 0) {
+        const ignoredCardsInfo = await ankiConnectInvoke('cardsInfo', { cards: ignoredCardIds });
+        const ignoredNoteIds = [...new Set(ignoredCardsInfo.map(c => c.note))];
+        const ignoredNotesInfo = await ankiConnectInvoke('notesInfo', { notes: ignoredNoteIds });
+
+        ignoredNotesInfo.forEach(note => {
+          const hebrewField = note.fields[fieldName];
+          if (hebrewField && hebrewField.value) {
+            let text = hebrewField.value.replace(/<[^>]*>/g, ' ').replace(/\[[^\]]*\]/g, ' ');
+            const matches = text.match(hebrewRegex);
+            if (matches) {
+              matches.map(w => w.replace(/[֑-ׇ]/g, '')).filter(w => w.length > 0)
+                .forEach(word => {
+                  ignoredWords.add(word);
+                  matureWords.delete(word);
+                  learningWords.delete(word);
+                });
+            }
+          }
+        });
+        console.log(`Loaded ${ignoredWords.size} words from Ignored deck`);
+      }
+    } catch (error) {
+      console.warn('Could not fetch Ignored deck (deck may not exist yet):', error.message);
+    }
+
     const matureArray = Array.from(matureWords).sort();
     const learningArray = Array.from(learningWords).sort();
+    const ignoredArray = Array.from(ignoredWords).sort();
 
     await chrome.storage.local.set({
       matureWords: matureArray,
       learningWords: learningArray,
+      ignoredWords: ignoredArray,
       hebrewWords: matureArray, // Backward compatibility
       lastUpdated: Date.now()
     });
 
-    console.log(`Fetched ${matureArray.length} mature + ${learningArray.length} learning Hebrew words from Anki`);
-    return { mature: matureArray, learning: learningArray };
+    console.log(`Fetched ${matureArray.length} mature + ${learningArray.length} learning + ${ignoredArray.length} ignored Hebrew words from Anki`);
+    return { mature: matureArray, learning: learningArray, ignored: ignoredArray };
 
   } catch (error) {
     console.error('Error fetching Hebrew words:', error);
@@ -978,6 +1052,7 @@ const MESSAGE_HANDLERS = {
         success: true,
         matureWords: result.mature,
         learningWords: result.learning,
+        ignoredWords: result.ignored || [],
         words: result.mature  // Backward compatibility
       }))
       .catch(error => sendResponse({ success: false, error: error.message }));
@@ -992,10 +1067,11 @@ const MESSAGE_HANDLERS = {
   },
 
   getWords: (request, sender, sendResponse) => {
-    chrome.storage.local.get(['matureWords', 'learningWords', 'hebrewWords', 'lastUpdated'])
+    chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords', 'hebrewWords', 'lastUpdated'])
       .then(data => sendResponse({
         matureWords: data.matureWords || [],
         learningWords: data.learningWords || [],
+        ignoredWords: data.ignoredWords || [],
         words: data.hebrewWords || [],  // Backward compatibility
         lastUpdated: data.lastUpdated
       }));
@@ -1124,7 +1200,7 @@ const MESSAGE_HANDLERS = {
           fields: {
             'Hebrew': word
           },
-          tags: ['am-known-manually'],
+          tags: ['ssh-known'],
           options: {
             allowDuplicate: true
           }
@@ -1145,6 +1221,47 @@ const MESSAGE_HANDLERS = {
         sendResponse({ success: true, noteId: noteId });
       } catch (error) {
         // If it's a duplicate error, treat as success (word is marked as known)
+        if (error.message && error.message.includes('duplicate')) {
+          sendResponse({ success: true, skipped: true, reason: 'Duplicate handled' });
+        } else {
+          sendResponse({ success: false, error: error.message });
+        }
+      }
+    })();
+    return true;
+  },
+
+  addToIgnored: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const word = request.word;
+        const escapedWord = word.replace(/"/g, '\\"');
+
+        const existing = await ankiConnectInvoke('findNotes', {
+          query: `"deck:Ignored" "Hebrew:${escapedWord}"`
+        });
+
+        if (existing && existing.length > 0) {
+          sendResponse({ success: true, skipped: true, reason: 'Word already in Ignored deck' });
+          return;
+        }
+
+        const note = {
+          deckName: 'Ignored',
+          modelName: 'Hebrew',
+          fields: { 'Hebrew': word },
+          tags: ['ssh-ignored'],
+          options: { allowDuplicate: true }
+        };
+
+        const noteId = await ankiConnectInvoke('addNote', { note });
+        const cardIds = await ankiConnectInvoke('findCards', { query: `nid:${noteId}` });
+        if (cardIds && cardIds.length > 0) {
+          await ankiConnectInvoke('suspend', { cards: cardIds });
+        }
+
+        sendResponse({ success: true, noteId });
+      } catch (error) {
         if (error.message && error.message.includes('duplicate')) {
           sendResponse({ success: true, skipped: true, reason: 'Duplicate handled' });
         } else {
@@ -1176,7 +1293,7 @@ const MESSAGE_HANDLERS = {
             fields: {
               'Hebrew': word
             },
-            tags: ['am-known-manually', 'bulk-import']
+            tags: ['ssh-known', 'ssh-bulk-import']
           };
 
           // Try to add the note
@@ -1580,6 +1697,118 @@ const MESSAGE_HANDLERS = {
         }
       })
       .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  },
+
+  storeAnkiImage: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const response = await fetch(request.url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const arrayBuffer = await response.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < uint8Array.length; i++) {
+          binary += String.fromCharCode(uint8Array[i]);
+        }
+        const base64 = btoa(binary);
+
+        const rawName = request.filename || request.url.split('/').pop().split('?')[0] || 'image.jpg';
+        const ext = rawName.split('.').pop().toLowerCase();
+        const validExts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
+        const finalExt = validExts.includes(ext) ? ext : 'jpg';
+        const safeName = 'ssh_' + rawName.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80);
+        const filename = safeName.endsWith('.' + finalExt) ? safeName : safeName + '.' + finalExt;
+
+        await ankiConnectInvoke('storeMediaFile', { filename, data: base64 });
+        sendResponse({ success: true, filename });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  },
+
+  generateGeminiImage: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get('settings');
+        const apiKey = data.settings?.geminiApiKey;
+        if (!apiKey) { sendResponse({ success: false, error: 'Gemini API key not configured in Settings' }); return; }
+        const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+          method: 'POST',
+          headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'gemini-3.1-flash-image', input: [{ type: 'text', text: request.prompt }] })
+        });
+        if (!response.ok) {
+          const errText = await response.text();
+          if (response.status === 429 && errText.includes('quota')) {
+            throw new Error('Gemini image generation requires billing to be enabled at aistudio.google.com/api-keys. There is no free tier for image generation.');
+          }
+          throw new Error(`Gemini API ${response.status}: ${errText.slice(0, 300)}`);
+        }
+        const json = await response.json();
+        let imageBase64, mimeType;
+        if (json.output) {
+          const part = json.output.find(p => p.type === 'image' || (p.mimeType && p.mimeType.startsWith('image/')));
+          if (part) { imageBase64 = part.data; mimeType = part.mimeType || 'image/png'; }
+        }
+        if (!imageBase64) throw new Error('No image in Gemini response');
+        const ext = mimeType?.includes('jpeg') ? 'jpg' : mimeType?.includes('webp') ? 'webp' : 'png';
+        const filename = `ssh_gemini_${Date.now()}.${ext}`;
+        await ankiConnectInvoke('storeMediaFile', { filename, data: imageBase64 });
+        sendResponse({ success: true, filename, dataUrl: `data:${mimeType};base64,${imageBase64}` });
+      } catch (error) { sendResponse({ success: false, error: error.message }); }
+    })();
+    return true;
+  },
+
+  generateCloudflareImage: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get('settings');
+        const accountId = data.settings?.cloudflareAccountId?.trim();
+        const apiToken = data.settings?.cloudflareApiToken?.trim();
+        if (!accountId || !apiToken) {
+          sendResponse({ success: false, error: 'Cloudflare Account ID and API Token not configured in Settings' });
+          return;
+        }
+        const model = data.settings?.cloudflareImageModel?.trim() || '@cf/black-forest-labs/flux-1-schnell';
+        const response = await fetch(
+          `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`,
+          {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: request.prompt, num_steps: 4 })
+          }
+        );
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Cloudflare AI ${response.status}: ${errText.slice(0, 300)}`);
+        }
+        const contentType = response.headers.get('content-type') || '';
+        let imageBase64, mimeType;
+        if (contentType.includes('application/json')) {
+          const json = await response.json();
+          imageBase64 = json.result?.image || json.image;
+          mimeType = 'image/png';
+        } else {
+          const arrayBuffer = await response.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let binary = '';
+          for (let i = 0; i < uint8Array.length; i++) binary += String.fromCharCode(uint8Array[i]);
+          imageBase64 = btoa(binary);
+          mimeType = contentType.split(';')[0].trim() || 'image/png';
+        }
+        if (!imageBase64) throw new Error('No image in Cloudflare response');
+        const ext = mimeType.includes('jpeg') ? 'jpg' : mimeType.includes('webp') ? 'webp' : 'png';
+        const filename = `ssh_cf_${Date.now()}.${ext}`;
+        await ankiConnectInvoke('storeMediaFile', { filename, data: imageBase64 });
+        sendResponse({ success: true, filename, dataUrl: `data:${mimeType};base64,${imageBase64}` });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
     return true;
   }
 };

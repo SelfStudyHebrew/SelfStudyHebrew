@@ -6,6 +6,7 @@
   // Global state
 let matureWords = [];
 let learningWords = [];
+let ignoredWords = [];
 let matureColor = '#ffff00';    // Yellow for mature words
 let learningColor = '#ffa500';  // Orange for learning words
 let sentenceColor = '#5a7fff';  // Blue for i+1 sentences
@@ -45,6 +46,9 @@ function getUnderlineColor(type) {
  * @returns {string} 'mature', 'learning', 'potentially-known', or 'unknown'
  */
 function getWordType(normalizedWord) {
+  // Ignored words: skip highlighting entirely
+  if (ignoredWords.includes(normalizedWord)) return null;
+
   // Check direct match first
   if (matureWords.includes(normalizedWord)) return 'mature';
   if (learningWords.includes(normalizedWord)) return 'learning';
@@ -77,6 +81,7 @@ async function initialize() {
     const wordsData = await chrome.runtime.sendMessage({ action: 'getWords' });
     matureWords = wordsData.matureWords || [];
     learningWords = wordsData.learningWords || [];
+    ignoredWords = wordsData.ignoredWords || [];
 
     const settingsData = await chrome.runtime.sendMessage({ action: 'getSettings' });
     if (settingsData.settings) {
@@ -93,13 +98,13 @@ async function initialize() {
     // Word highlighting must happen FIRST, then sentence highlighting
     // This is because sentence highlighting needs to count which words are unknown
     if (highlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
-      const stats = window.highlightWords(matureWords, learningWords);
+      const stats = window.highlightWords(matureWords, learningWords, ignoredWords);
       pageStats = { ...pageStats, ...stats };
       isHighlighted = true;
     }
 
     if (sentenceHighlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
-      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor);
+      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
       pageStats.i1Sentences = i1Count;
       pageStats.potentiallyI1Sentences = potentiallyI1Count;
       isSentenceHighlighted = true;
@@ -121,8 +126,9 @@ async function refreshWords() {
     if (response.success) {
       matureWords = response.matureWords || [];
       learningWords = response.learningWords || [];
+      ignoredWords = response.ignoredWords || [];
 
-      console.log('[Coordinator] Words refreshed:', matureWords.length, 'mature,', learningWords.length, 'learning');
+      console.log('[Coordinator] Words refreshed:', matureWords.length, 'mature,', learningWords.length, 'learning,', ignoredWords.length, 'ignored');
 
       if (isSentenceHighlighted) {
         window.removeSentenceHighlights();
@@ -135,13 +141,13 @@ async function refreshWords() {
       }
 
       if (highlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
-        const stats = window.highlightWords(matureWords, learningWords);
+        const stats = window.highlightWords(matureWords, learningWords, ignoredWords);
         pageStats = { ...pageStats, ...stats };
         isHighlighted = true;
       }
 
       if (sentenceHighlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
-        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor);
+        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
         isSentenceHighlighted = true;
@@ -188,6 +194,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
       needsReload = true;
     }
 
+    if (changes.ignoredWords) {
+      ignoredWords = changes.ignoredWords.newValue || [];
+      needsReload = true;
+    }
+
     if (changes.settings) {
       const newSettings = changes.settings.newValue;
       if (newSettings) {
@@ -218,12 +229,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
       // Word highlighting must happen FIRST, then sentence highlighting
       if (highlightEnabled) {
-        const stats = window.highlightWords(matureWords, learningWords);
+        const stats = window.highlightWords(matureWords, learningWords, ignoredWords);
         pageStats = { ...pageStats, ...stats };
         isHighlighted = true;
       }
       if (sentenceHighlightEnabled) {
-        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor);
+        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
         isSentenceHighlighted = true;
@@ -251,6 +262,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
     matureWords = request.matureWords || [];
     learningWords = request.learningWords || [];
+    ignoredWords = request.ignoredWords || ignoredWords;
     matureColor = request.matureColor || matureColor;
     learningColor = request.learningColor || learningColor;
     sentenceColor = request.sentenceColor || sentenceColor;  // keep existing value if not provided
@@ -259,12 +271,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
 
     // Word highlighting must happen FIRST, then sentence highlighting
     if (highlightEnabled) {
-      const stats = window.highlightWords(matureWords, learningWords);
+      const stats = window.highlightWords(matureWords, learningWords, ignoredWords);
       pageStats = { ...pageStats, ...stats };
       isHighlighted = true;
     }
     if (sentenceHighlightEnabled) {
-      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor);
+      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
       pageStats.i1Sentences = i1Count;
       pageStats.potentiallyI1Sentences = potentiallyI1Count;
       isSentenceHighlighted = true;
@@ -290,10 +302,11 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (window.openAnkiModal && request.sentence) {
       const getWordsCallback = async () => {
         return new Promise((resolve) => {
-          chrome.storage.local.get(['matureWords', 'learningWords'], (data) => {
+          chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords'], (data) => {
             resolve({
               matureWords: data.matureWords || [],
-              learningWords: data.learningWords || []
+              learningWords: data.learningWords || [],
+              ignoredWords: data.ignoredWords || []
             });
           });
         });
@@ -376,7 +389,7 @@ const observer = new MutationObserver((mutations) => {
         const resetStats = window.removeHighlights();
         pageStats = { ...pageStats, ...resetStats };
       }
-      const stats = window.highlightWords(matureWords, learningWords);
+      const stats = window.highlightWords(matureWords, learningWords, ignoredWords);
       pageStats = { ...pageStats, ...stats };
       isHighlighted = true;
 
@@ -384,7 +397,7 @@ const observer = new MutationObserver((mutations) => {
         if (isSentenceHighlighted) {
           window.removeSentenceHighlights();
         }
-        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor);
+        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
         isSentenceHighlighted = true;
@@ -420,12 +433,14 @@ function handleSubtitleUpdate(subtitleElement, platform) {
     const normalized = window.normalizeHebrew(word);
     const wordType = getWordType(normalized);
 
-    matches.push({
-      word: word,
-      type: wordType,
-      index: match.index,
-      length: word.length
-    });
+    if (wordType !== null) {  // null means ignored — skip highlighting
+      matches.push({
+        word: word,
+        type: wordType,
+        index: match.index,
+        length: word.length
+      });
+    }
   }
 
   if (matches.length > 0) {
@@ -467,8 +482,8 @@ function handleSubtitleUpdate(subtitleElement, platform) {
   }
 
   if (sentenceHighlightEnabled) {
-    const isI1 = window.checkIfI1Sentence(subtitleText, matureWords, learningWords);
-    const isPotentiallyI1 = !isI1 && window.checkIfPotentiallyI1Sentence(subtitleText, matureWords, learningWords);
+    const isI1 = window.checkIfI1Sentence(subtitleText, matureWords, learningWords, ignoredWords);
+    const isPotentiallyI1 = !isI1 && window.checkIfPotentiallyI1Sentence(subtitleText, matureWords, learningWords, ignoredWords);
 
     // Helper: apply border+glow style to a span given an accent hex colour
     const applyI1Style = (span, hexColor) => {
@@ -670,9 +685,10 @@ if (document.readyState === 'loading') {
         console.log(`[Coordinator] Clearing and populating container with ${data.subtitles.length} items`);
         container.innerHTML = '';
 
-        const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'settings']);
+        const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords', 'settings']);
         const matureWordsLocal = storage.matureWords || [];
         const learningWordsLocal = storage.learningWords || [];
+        const ignoredWordsLocal = storage.ignoredWords || [];
         const sentenceHighlightEnabledLocal = storage.settings?.sentenceHighlightEnabled !== false;
         const sentenceColorLocal = storage.settings?.sentenceColor || '#5a7fff';
 
@@ -680,7 +696,7 @@ if (document.readyState === 'loading') {
           const item = document.createElement('div');
           item.dataset.index = sub.index;
 
-          const isI1 = sentenceHighlightEnabledLocal && window.checkIfI1Sentence(sub.text, matureWordsLocal, learningWordsLocal);
+          const isI1 = sentenceHighlightEnabledLocal && window.checkIfI1Sentence(sub.text, matureWordsLocal, learningWordsLocal, ignoredWordsLocal);
 
           // Parse the hex colour for rgba derivation
           const r = parseInt(sentenceColorLocal.slice(1, 3), 16);

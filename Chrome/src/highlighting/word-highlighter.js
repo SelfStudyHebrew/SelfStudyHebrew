@@ -25,8 +25,11 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {string} Word type: 'mature', 'learning', 'potentially-known', or 'unknown'
    */
-  function getWordType(word, matureWords, learningWords) {
+  function getWordType(word, matureWords, learningWords, ignoredWords = []) {
     const normalized = window.normalizeHebrew(word);
+
+    // Ignored words: skip highlighting entirely
+    if (ignoredWords.length > 0 && ignoredWords.includes(normalized)) return null;
 
     // Check if word is known as-is
     if (matureWords.includes(normalized)) {
@@ -73,7 +76,7 @@
    * @param {Array} matureWords - Array of mature/known words
    * @param {Array} learningWords - Array of learning words
    */
-  function highlightTextNode(textNode, uniqueWords, matureWords, learningWords) {
+  function highlightTextNode(textNode, uniqueWords, matureWords, learningWords, ignoredWords) {
     const text = textNode.textContent;
     const matches = [];
     let match;
@@ -83,8 +86,8 @@
 
     // Find all Hebrew words
     while ((match = window.HEBREW_WORD_REGEX.exec(text)) !== null) {
-      const wordType = getWordType(match[0], matureWords, learningWords);
-      if (wordType) {
+      const wordType = getWordType(match[0], matureWords, learningWords, ignoredWords);
+      if (wordType) {  // null means ignored — skip
         matches.push({
           word: match[0],
           type: wordType,
@@ -148,7 +151,7 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {Object} Page statistics {total, known, unknown}
    */
-  function highlightWords(matureWords, learningWords) {
+  function highlightWords(matureWords, learningWords, ignoredWords = []) {
     const body = document.body;
     if (!body) {
       return { total: 0, known: 0, unknown: 0 };
@@ -201,13 +204,13 @@
 
     // Process nodes
     nodesToProcess.forEach(textNode => {
-      highlightTextNode(textNode, uniqueWords, matureWords, learningWords);
+      highlightTextNode(textNode, uniqueWords, matureWords, learningWords, ignoredWords);
     });
 
     // Calculate final stats from unique words
     const total = uniqueWords.size;
     const known = Array.from(uniqueWords).filter(word => {
-      const wordType = getWordType(word, matureWords, learningWords);
+      const wordType = getWordType(word, matureWords, learningWords, ignoredWords);
       return wordType === 'mature' || wordType === 'learning';
     }).length;
     const unknown = total - known;

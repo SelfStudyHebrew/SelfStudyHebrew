@@ -360,6 +360,7 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
           Create Anki Card
         </button>
         ${!isPhrase ? `<button id="mark-known-btn" style="${S.btnBase}width:100%;background:${S.surface3};color:${S.text};border-color:#3a3a52;font-size:12.5px;">Mark as Already Known</button>` : ''}
+        ${!isPhrase ? `<button id="ignore-word-btn" style="${S.btnBase}width:100%;background:${S.surface3};color:${S.text};border-color:#3a3a52;font-size:12.5px;">Ignore Word</button>` : ''}
       </div>
     `;
 
@@ -707,6 +708,61 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
             markKnownBtn.style.borderColor = '#2c2c3e';
             markKnownBtn.textContent = 'Mark as Already Known';
             markKnownBtn.disabled = false;
+          }, 2000);
+        }
+      });
+    }
+
+    // Add event listener for "Ignore Word" button
+    const ignoreWordBtn = document.getElementById('ignore-word-btn');
+    if (ignoreWordBtn) {
+      ignoreWordBtn.addEventListener('click', async () => {
+        ignoreWordBtn.disabled = true;
+        ignoreWordBtn.textContent = 'Ignoring...';
+
+        try {
+          const response = await chrome.runtime.sendMessage({
+            action: 'addToIgnored',
+            word: word
+          });
+
+          if (!response.success) {
+            throw new Error(response.error || 'Failed to ignore word');
+          }
+
+          ignoreWordBtn.style.background = 'rgba(52,211,153,0.12)';
+          ignoreWordBtn.style.color = '#34d399';
+          ignoreWordBtn.style.borderColor = 'rgba(52,211,153,0.30)';
+          ignoreWordBtn.textContent = '✓ Ignored! Refreshing...';
+
+          if (refreshWordsCallback) {
+            await refreshWordsCallback();
+          }
+
+          document.dispatchEvent(new CustomEvent('ankiWordsRefreshed'));
+
+          setTimeout(() => {
+            ignoreWordBtn.style.background = '#21212e';
+            ignoreWordBtn.style.color = '#8f8fa8';
+            ignoreWordBtn.style.borderColor = '#2c2c3e';
+            ignoreWordBtn.textContent = 'Ignore Word';
+            ignoreWordBtn.disabled = false;
+          }, 2000);
+
+        } catch (error) {
+          console.error('Error ignoring word:', error);
+
+          ignoreWordBtn.style.background = 'rgba(248,113,113,0.10)';
+          ignoreWordBtn.style.color = '#f87171';
+          ignoreWordBtn.style.borderColor = 'rgba(248,113,113,0.30)';
+          ignoreWordBtn.textContent = '✗ Failed';
+
+          setTimeout(() => {
+            ignoreWordBtn.style.background = '#21212e';
+            ignoreWordBtn.style.color = '#8f8fa8';
+            ignoreWordBtn.style.borderColor = '#2c2c3e';
+            ignoreWordBtn.textContent = 'Ignore Word';
+            ignoreWordBtn.disabled = false;
           }, 2000);
         }
       });

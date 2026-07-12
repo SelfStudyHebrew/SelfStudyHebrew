@@ -10,7 +10,7 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {number} Count of unknown words
    */
-  function countUnknownWords(hebrewWords, matureWords, learningWords) {
+  function countUnknownWords(hebrewWords, matureWords, learningWords, ignoredWords = []) {
     const uniqueWordsInSentence = new Set();
     let unknownCount = 0;
 
@@ -18,7 +18,7 @@
       const normalized = window.normalizeHebrew(word);
       if (normalized.length > 0 && !uniqueWordsInSentence.has(normalized)) {
         uniqueWordsInSentence.add(normalized);
-        if (!window.isWordKnown(normalized, matureWords, learningWords)) {
+        if (!window.isWordKnown(normalized, matureWords, learningWords, ignoredWords)) {
           unknownCount++;
         }
       }
@@ -38,6 +38,7 @@
       const wordsData = await chrome.runtime.sendMessage({ action: 'getWords' });
       const matureWords = wordsData.matureWords || [];
       const learningWords = wordsData.learningWords || [];
+      const ignoredWords = wordsData.ignoredWords || [];
 
       // Collect all unique Hebrew words from subtitles
       const uniqueWords = new Set();
@@ -58,7 +59,7 @@
         // Count i+1 sentences (sentences with exactly 1 unknown word, 0 potentially-known)
         // and potentially-i+1 sentences (exactly 1 potentially-known word, 0-1 unknown words)
         if (hebrewWords.length >= 3) {
-          const {unknownCount, potentiallyKnownCount} = countWordTypes(hebrewWords, matureWords, learningWords);
+          const {unknownCount, potentiallyKnownCount} = countWordTypes(hebrewWords, matureWords, learningWords, ignoredWords);
 
           // Regular i+1: 1 unknown word, 0 potentially-known words
           if (unknownCount === 1 && potentiallyKnownCount === 0) {
@@ -75,7 +76,7 @@
       let knownCount = 0;
       let potentiallyKnownCount = 0;
       uniqueWords.forEach(word => {
-        const type = window.getWordKnownType(word, matureWords, learningWords);
+        const type = window.getWordKnownType(word, matureWords, learningWords, ignoredWords);
         if (type === 'known') {
           knownCount++;
         } else if (type === 'potentially-known') {
@@ -107,7 +108,7 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {Object} {unknownCount, potentiallyKnownCount}
    */
-  function countWordTypes(hebrewWords, matureWords, learningWords) {
+  function countWordTypes(hebrewWords, matureWords, learningWords, ignoredWords = []) {
     const uniqueWordsInSentence = new Set();
     let unknownCount = 0;
     let potentiallyKnownCount = 0;
@@ -116,12 +117,13 @@
       const normalized = window.normalizeHebrew(word);
       if (normalized.length > 0 && !uniqueWordsInSentence.has(normalized)) {
         uniqueWordsInSentence.add(normalized);
-        const type = window.getWordKnownType(normalized, matureWords, learningWords);
+        const type = window.getWordKnownType(normalized, matureWords, learningWords, ignoredWords);
         if (type === 'unknown') {
           unknownCount++;
         } else if (type === 'potentially-known') {
           potentiallyKnownCount++;
         }
+        // 'known' and 'ignored' both don't count as unknown
       }
     });
 
@@ -142,7 +144,7 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {boolean} True if sentence is i+1
    */
-  function checkIfI1Sentence(sentenceText, matureWords, learningWords) {
+  function checkIfI1Sentence(sentenceText, matureWords, learningWords, ignoredWords = []) {
     if (!sentenceText) return false;
 
     // Extract Hebrew words, filter out single letters
@@ -152,8 +154,8 @@
     // Need at least 3 words to be a meaningful sentence
     if (hebrewWords.length < 3) return false;
 
-    // Count unknown words
-    const unknownCount = countUnknownWords(hebrewWords, matureWords, learningWords);
+    // Count unknown words (ignored words don't count as unknown)
+    const unknownCount = countUnknownWords(hebrewWords, matureWords, learningWords, ignoredWords);
 
     // i+1 means exactly 1 unknown word
     return unknownCount === 1;
@@ -169,7 +171,7 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {boolean} True if sentence is potentially-i+1
    */
-  function checkIfPotentiallyI1Sentence(sentenceText, matureWords, learningWords) {
+  function checkIfPotentiallyI1Sentence(sentenceText, matureWords, learningWords, ignoredWords = []) {
     if (!sentenceText) return false;
 
     // Extract Hebrew words, filter out single letters
@@ -179,8 +181,8 @@
     // Need at least 3 words to be a meaningful sentence
     if (hebrewWords.length < 3) return false;
 
-    // Count word types
-    const {unknownCount, potentiallyKnownCount} = countWordTypes(hebrewWords, matureWords, learningWords);
+    // Count word types (ignored words don't count as unknown)
+    const {unknownCount, potentiallyKnownCount} = countWordTypes(hebrewWords, matureWords, learningWords, ignoredWords);
 
     // Potentially-i+1 has two scenarios:
     // 1. Exactly 1 potentially-known word and 0 unknown words

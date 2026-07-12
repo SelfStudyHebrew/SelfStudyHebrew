@@ -96,7 +96,7 @@
    * @param {string} potentiallyI1Color - Color for potentially-i+1 sentence highlights
    * @returns {Object} {i1Count, potentiallyI1Count}
    */
-  function highlightSentences(matureWords, learningWords, sentenceColor, potentiallyI1Color = '#9b6bff') {
+  function highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords = [], potentiallyI1Color = '#9b6bff') {
     const body = document.body;
     if (!body) return {i1Count: 0, potentiallyI1Count: 0};
 
@@ -198,7 +198,7 @@
           const normalized = window.normalizeHebrew(word);
           if (!uniqueWords.has(normalized)) {
             uniqueWords.add(normalized);
-            const wordType = window.getWordKnownType(normalized, matureWords, learningWords);
+            const wordType = window.getWordKnownType(normalized, matureWords, learningWords, ignoredWords);
             if (wordType === 'unknown') {
               unknownCount++;
               unknownWordsList.push(word);

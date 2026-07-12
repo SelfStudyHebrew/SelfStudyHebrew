@@ -550,9 +550,10 @@
     }
 
     // Get words and settings for i+1 detection
-    const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'settings']);
+    const storage = await chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords', 'settings']);
     const matureWords = storage.matureWords || [];
     const learningWords = storage.learningWords || [];
+    const ignoredWords = storage.ignoredWords || [];
     const sentenceHighlightEnabled = storage.settings?.sentenceHighlightEnabled !== false;
 
     container.innerHTML = '';
@@ -562,8 +563,8 @@
       item.dataset.index = index;
 
       // Check if this subtitle is i+1 or potentially-i+1
-      const isI1Sentence = sentenceHighlightEnabled && window.checkIfI1Sentence(sub.text, matureWords, learningWords);
-      const isPotentiallyI1Sentence = sentenceHighlightEnabled && !isI1Sentence && window.checkIfPotentiallyI1Sentence(sub.text, matureWords, learningWords);
+      const isI1Sentence = sentenceHighlightEnabled && window.checkIfI1Sentence(sub.text, matureWords, learningWords, ignoredWords);
+      const isPotentiallyI1Sentence = sentenceHighlightEnabled && !isI1Sentence && window.checkIfPotentiallyI1Sentence(sub.text, matureWords, learningWords, ignoredWords);
 
       // Dark-theme appropriate colours for i+1 items
       let backgroundColor = '#13131a';
@@ -630,10 +631,11 @@
 
           // Provide callback to get word lists from storage
           const getWordsCallback = async () => {
-            const data = await chrome.storage.local.get(['matureWords', 'learningWords']);
+            const data = await chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords']);
             return {
               matureWords: data.matureWords || [],
-              learningWords: data.learningWords || []
+              learningWords: data.learningWords || [],
+              ignoredWords: data.ignoredWords || []
             };
           };
 
@@ -698,7 +700,13 @@
         if (wordMatch.index > lastIdx) {
           fragment.appendChild(document.createTextNode(displayText.substring(lastIdx, wordMatch.index)));
         }
-        const wordType = window.getWordType(window.normalizeHebrew(wordMatch[0]), matureWords, learningWords);
+        const wordType = window.getWordType(window.normalizeHebrew(wordMatch[0]), matureWords, learningWords, ignoredWords);
+        if (wordType === null) {
+          // Ignored word — render as plain text, no underline
+          fragment.appendChild(document.createTextNode(wordMatch[0]));
+          lastIdx = wordMatch.index + wordMatch[0].length;
+          continue;
+        }
         const span = document.createElement('span');
         span.textContent = wordMatch[0];
         span.className = `anki-hebrew-highlight anki-${wordType}`;

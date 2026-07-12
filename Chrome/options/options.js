@@ -43,7 +43,16 @@ const claudeApiKeyInput = document.getElementById('claude-api-key');
 const claudeModelInput = document.getElementById('claude-model');
 const elevenLabsApiKeyInput = document.getElementById('elevenlabs-api-key');
 const elevenLabsVoiceIdInput = document.getElementById('elevenlabs-voice-id');
+document.querySelectorAll('.voice-preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    elevenLabsVoiceIdInput.value = btn.dataset.voiceId;
+  });
+});
 const elevenLabsModelInput = document.getElementById('elevenlabs-model');
+const geminiApiKeyInput = document.getElementById('gemini-api-key');
+const cloudflareAccountIdInput = document.getElementById('cloudflare-account-id');
+const cloudflareApiTokenInput = document.getElementById('cloudflare-api-token');
+const cloudflareImageModelInput = document.getElementById('cloudflare-image-model');
 const maxWordsI1Input = document.getElementById('max-words-i1');
 const sentenceGenerationPromptInput = document.getElementById('sentence-generation-prompt');
 const resetPromptBtn = document.getElementById('reset-prompt-btn');
@@ -54,6 +63,7 @@ const resetSpendBtn = document.getElementById('reset-spend-btn');
 const defaultDeckSelect = document.getElementById('default-deck');
 const defaultNoteTypeSelect = document.getElementById('default-note-type');
 const audioFieldNameInput = document.getElementById('audio-field-name');
+const imageFieldNameInput = document.getElementById('image-field-name');
 const sentenceColorInput = document.getElementById('sentence-color');
 const sentenceColorText = document.getElementById('sentence-color-text');
 const sentenceHighlightEnabled = document.getElementById('sentence-highlight-enabled');
@@ -248,6 +258,10 @@ async function loadSettings() {
       elevenLabsApiKeyInput.value = settings.elevenLabsApiKey || '';
       elevenLabsVoiceIdInput.value = settings.elevenLabsVoiceId || 'Jrq4GqCKqYpigdQsZRkP';
       elevenLabsModelInput.value = settings.elevenLabsModel || 'eleven_v3';
+      geminiApiKeyInput.value = settings.geminiApiKey || '';
+      cloudflareAccountIdInput.value = settings.cloudflareAccountId || '';
+      cloudflareApiTokenInput.value = settings.cloudflareApiToken || '';
+      cloudflareImageModelInput.value = settings.cloudflareImageModel || '';
       maxWordsI1Input.value = settings.maxWordsForI1 || 3000;
       sentenceGenerationPromptInput.value = settings.sentenceGenerationPrompt || DEFAULT_SENTENCE_PROMPT;
       aiDefinePromptInput.value = settings.aiDefinePrompt || DEFAULT_DEFINE_PROMPT;
@@ -258,6 +272,7 @@ async function loadSettings() {
       autoExportEnabled.checked = settings.autoExportEnabled || false;
       autoExportFilename.value = settings.autoExportFilename || 'selfstudyhebrew-custom-definitions.json';
       audioFieldNameInput.value = settings.audioFieldName || 'Audio';
+      imageFieldNameInput.value = settings.imageFieldName || 'Image';
       fieldNameInput.value = settings.fieldName;
       deckFilterInput.value = settings.deckFilter || '';
       matureThresholdInput.value = settings.matureThreshold || 21;
@@ -363,12 +378,17 @@ async function saveSettings() {
     settings.elevenLabsApiKey = elevenLabsApiKeyInput.value.trim();
     settings.elevenLabsVoiceId = elevenLabsVoiceIdInput.value.trim() || 'Jrq4GqCKqYpigdQsZRkP';
     settings.elevenLabsModel = elevenLabsModelInput.value.trim() || 'eleven_v3';
+    settings.geminiApiKey = geminiApiKeyInput.value.trim();
+    settings.cloudflareAccountId = cloudflareAccountIdInput.value.trim();
+    settings.cloudflareApiToken = cloudflareApiTokenInput.value.trim();
+    settings.cloudflareImageModel = cloudflareImageModelInput.value.trim();
     settings.maxWordsForI1 = parseInt(maxWordsI1Input.value) || 3000;
     settings.sentenceGenerationPrompt = sentenceGenerationPromptInput.value.trim() || DEFAULT_SENTENCE_PROMPT;
     settings.aiDefinePrompt = aiDefinePromptInput.value.trim() || DEFAULT_DEFINE_PROMPT;
     settings.defaultDeck = defaultDeckSelect.value;
     settings.defaultNoteType = defaultNoteTypeSelect.value;
     settings.audioFieldName = audioFieldNameInput.value.trim() || 'Audio';
+    settings.imageFieldName = imageFieldNameInput.value.trim() || 'Image';
     settings.sentenceColor = sentenceColor;
     settings.sentenceHighlightEnabled = sentenceHighlightEnabled.checked;
     settings.stripNikudEnabled = stripNikudEnabled.checked;
@@ -911,6 +931,47 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// Load and display ElevenLabs character usage
+const elevenLabsUsageText = document.getElementById('elevenlabs-usage-text');
+const elevenLabsUsageDesc = document.getElementById('elevenlabs-usage-desc');
+const refreshElevenLabsBtn = document.getElementById('refresh-elevenlabs-btn');
+
+async function loadElevenLabsUsage() {
+  const data = await chrome.storage.local.get('settings');
+  const apiKey = data.settings && data.settings.elevenLabsApiKey;
+  if (!apiKey) {
+    elevenLabsUsageText.textContent = '—';
+    elevenLabsUsageDesc.textContent = 'Save your ElevenLabs API key first, then click Refresh.';
+    return;
+  }
+  elevenLabsUsageText.textContent = '…';
+  try {
+    const response = await fetch('https://api.elevenlabs.io/v1/user', {
+      headers: { 'xi-api-key': apiKey }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const json = await response.json();
+    const sub = json.subscription;
+    const used = sub.character_count.toLocaleString();
+    const limit = sub.character_limit.toLocaleString();
+    const pct = sub.character_limit > 0
+      ? Math.round((sub.character_count / sub.character_limit) * 100)
+      : 0;
+    const tier = sub.tier === 'payg' ? 'Pay As You Go' : sub.tier.charAt(0).toUpperCase() + sub.tier.slice(1);
+    const resetDate = sub.next_character_count_reset_unix
+      ? new Date(sub.next_character_count_reset_unix * 1000).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+      : null;
+    elevenLabsUsageText.textContent = `${used} / ${limit} (${pct}%)`;
+    elevenLabsUsageDesc.textContent = `Plan: ${tier}. Characters used this billing period${resetDate ? ` — resets ${resetDate}` : ''}.`;
+  } catch (e) {
+    elevenLabsUsageText.textContent = 'Error';
+    elevenLabsUsageDesc.textContent = `Could not fetch usage: ${e.message}`;
+  }
+}
+
+refreshElevenLabsBtn.addEventListener('click', loadElevenLabsUsage);
+
 // Load settings on page load
 loadSettings();
 loadSpendTotal();
+loadElevenLabsUsage();

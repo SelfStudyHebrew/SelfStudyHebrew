@@ -274,6 +274,370 @@ async function handleGenerateAudio(button) {
   }
 }
 
+// ── Image search helpers ────────────────────────────────────────────────────
+
+function isImageFilename(name) {
+  return /\.(jpe?g|png|gif|webp|svg)$/i.test(name);
+}
+
+async function searchWikimedia(q) {
+  try {
+    const url = 'https://commons.wikimedia.org/w/api.php?' + new URLSearchParams({
+      action: 'query', generator: 'search', gsrsearch: q,
+      gsrlimit: 16, gsrnamespace: 6, prop: 'imageinfo',
+      iiprop: 'url', iiurlwidth: 220, format: 'json', origin: '*'
+    });
+    const data = await fetch(url).then(r => r.json());
+    return Object.values(data.query?.pages || {})
+      .map(x => ({
+        thumb: x.imageinfo?.[0]?.thumburl,
+        url: x.imageinfo?.[0]?.url,
+        filename: (x.title || '').replace('File:', ''),
+        source: 'Wikimedia'
+      }))
+      .filter(x => x.thumb && x.url && isImageFilename(x.filename));
+  } catch { return []; }
+}
+
+async function searchOpenverse(q) {
+  try {
+    const url = 'https://api.openverse.org/v1/images/?' + new URLSearchParams({ q, page_size: 16 });
+    const data = await fetch(url).then(r => r.json());
+    return (data.results || [])
+      .map(x => ({
+        thumb: x.thumbnail,
+        url: x.url,
+        filename: x.url.split('/').pop().split('?')[0] || 'image.jpg',
+        source: 'Openverse'
+      }))
+      .filter(x => x.thumb && x.url);
+  } catch { return []; }
+}
+
+const IMAGE_FIELD_NAMES = ['image', 'picture', 'photo', 'img'];
+
+function isImageField(fieldName) {
+  return IMAGE_FIELD_NAMES.some(n => fieldName.toLowerCase().includes(n));
+}
+
+function createImagePickerField(field, fieldId) {
+  const aiButtonStyle = `
+    padding: 5px 9px;
+    background: #21212e;
+    color: #8aabff;
+    border: 1px solid #2c2c3e;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+    letter-spacing: 0.1px;
+  `;
+
+  const wrapper = document.createElement('div');
+
+  // Hidden textarea — picked up by createAnkiCard
+  const hiddenTextarea = document.createElement('textarea');
+  hiddenTextarea.id = `anki-field-${fieldId}`;
+  hiddenTextarea.setAttribute('data-field-name', field);
+  hiddenTextarea.style.display = 'none';
+  wrapper.appendChild(hiddenTextarea);
+
+  // Search row
+  const searchRow = document.createElement('div');
+  searchRow.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.placeholder = 'Search images…';
+  searchInput.style.cssText = `
+    flex:1;padding:7px 10px;border:1px solid #2c2c3e;border-radius:6px;
+    background:#1a1a24;color:#ededf5;font-size:13px;outline:none;
+    transition:border-color 0.15s;
+  `;
+  searchInput.addEventListener('focus', () => { searchInput.style.borderColor = '#5a7fff'; });
+  searchInput.addEventListener('blur',  () => { searchInput.style.borderColor = '#2c2c3e'; });
+
+  const searchBtn = document.createElement('button');
+  searchBtn.textContent = 'Search';
+  searchBtn.style.cssText = aiButtonStyle + 'padding:7px 13px;font-size:12px;';
+
+  searchRow.appendChild(searchInput);
+  searchRow.appendChild(searchBtn);
+  wrapper.appendChild(searchRow);
+
+  // Source tabs
+  const tabRow = document.createElement('div');
+  tabRow.style.cssText = 'display:flex;gap:4px;margin-bottom:6px;';
+  const tabDefs = [
+    { id: 'all',       label: 'All' },
+    { id: 'wikimedia', label: 'Wikimedia' },
+    { id: 'openverse', label: 'Openverse' },
+    { id: 'generate',  label: '✨ Generate' },
+  ];
+  let activeTab = 'all';
+  let lastResults = [];
+
+  function setSearchMode(isSearch) {
+    searchRow.style.display = isSearch ? 'flex' : 'none';
+    grid.style.display      = isSearch ? 'grid' : 'none';
+    statusLine.style.display = isSearch ? 'block' : 'none';
+    generatePanel.style.display = isSearch ? 'none' : 'block';
+  }
+
+  tabDefs.forEach(t => {
+    const tab = document.createElement('button');
+    tab.textContent = t.label;
+    tab.dataset.tabId = t.id;
+    tab.style.cssText = `
+      padding:3px 10px;border-radius:4px;font-size:11px;cursor:pointer;
+      border:1px solid #2c2c3e;
+      background:${t.id === 'all' ? '#2c2c3e' : '#1a1a24'};
+      color:${t.id === 'all' ? '#ededf5' : '#8f8fa8'};transition:all 0.1s;
+    `;
+    tab.addEventListener('click', () => {
+      activeTab = t.id;
+      tabRow.querySelectorAll('button').forEach(b => {
+        const isActive = b.dataset.tabId === activeTab;
+        b.style.background = isActive ? '#2c2c3e' : '#1a1a24';
+        b.style.color      = isActive ? '#ededf5' : '#8f8fa8';
+      });
+      if (activeTab === 'generate') {
+        setSearchMode(false);
+        return;
+      }
+      setSearchMode(true);
+      const filtered = activeTab === 'all'
+        ? lastResults
+        : lastResults.filter(r => r.source.toLowerCase() === activeTab);
+      renderResults(filtered);
+    });
+    tabRow.appendChild(tab);
+  });
+  wrapper.appendChild(tabRow);
+
+  // Selected preview strip
+  const preview = document.createElement('div');
+  preview.style.cssText = 'margin-bottom:6px;min-height:0;';
+  wrapper.appendChild(preview);
+
+  // Results grid
+  const grid = document.createElement('div');
+  grid.style.cssText = `
+    display:grid;grid-template-columns:repeat(4,1fr);gap:5px;
+    max-height:180px;overflow-y:auto;
+    scrollbar-width:thin;scrollbar-color:#2c2c3e transparent;
+  `;
+  wrapper.appendChild(grid);
+
+  // Status line
+  const statusLine = document.createElement('div');
+  statusLine.style.cssText = 'color:#8f8fa8;font-size:11.5px;margin-top:4px;min-height:16px;';
+  wrapper.appendChild(statusLine);
+
+  // Generate panel (hidden unless Generate tab active)
+  const generatePanel = document.createElement('div');
+  generatePanel.style.display = 'none';
+
+  const promptTextarea = document.createElement('textarea');
+  promptTextarea.placeholder = 'Describe the image you want…';
+  promptTextarea.style.cssText = `
+    width:100%;box-sizing:border-box;min-height:62px;padding:8px 11px;
+    border:1px solid #2c2c3e;border-radius:6px;background:#1a1a24;
+    color:#ededf5;font-size:13px;outline:none;resize:vertical;
+    transition:border-color 0.15s;margin-bottom:7px;
+  `;
+  promptTextarea.addEventListener('focus', () => { promptTextarea.style.borderColor = '#5a7fff'; });
+  promptTextarea.addEventListener('blur',  () => { promptTextarea.style.borderColor = '#2c2c3e'; });
+
+  // Provider selector row
+  const providerRow = document.createElement('div');
+  providerRow.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:7px;';
+
+  const providerLabel = document.createElement('span');
+  providerLabel.textContent = 'Provider:';
+  providerLabel.style.cssText = 'color:#8f8fa8;font-size:11.5px;white-space:nowrap;';
+
+  const providerSelect = document.createElement('select');
+  providerSelect.style.cssText = `
+    flex:1;padding:5px 8px;border:1px solid #2c2c3e;border-radius:5px;
+    background:#1a1a24;color:#ededf5;font-size:12px;cursor:pointer;outline:none;
+  `;
+  [
+    { value: 'cloudflare', label: '☁️ Cloudflare (free — Flux Schnell)' },
+    { value: 'gemini',     label: '✦ Gemini (paid — ~$0.05/image)' },
+  ].forEach(({ value, label }) => {
+    const opt = document.createElement('option');
+    opt.value = value; opt.textContent = label;
+    providerSelect.appendChild(opt);
+  });
+
+  providerRow.appendChild(providerLabel);
+  providerRow.appendChild(providerSelect);
+
+  const generateBtn = document.createElement('button');
+  generateBtn.textContent = '✨ Generate Image';
+  generateBtn.style.cssText = aiButtonStyle + 'padding:7px 14px;font-size:12px;margin-bottom:8px;';
+
+  const generateStatus = document.createElement('div');
+  generateStatus.style.cssText = 'color:#8f8fa8;font-size:11.5px;min-height:16px;margin-top:2px;';
+
+  generateBtn.addEventListener('click', async () => {
+    const prompt = promptTextarea.value.trim();
+    if (!prompt) return;
+    const provider = providerSelect.value;
+    const action = provider === 'gemini' ? 'generateGeminiImage' : 'generateCloudflareImage';
+    const providerName = provider === 'gemini' ? 'Gemini' : 'Cloudflare';
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Generating…';
+    generateStatus.style.color = '#8f8fa8';
+    generateStatus.textContent = `Calling ${providerName}…`;
+    hiddenTextarea.value = '';
+    preview.innerHTML = '';
+
+    try {
+      const resp = await chrome.runtime.sendMessage({ action, prompt });
+      if (resp.success) {
+        hiddenTextarea.value = `<img src="${resp.filename}">`;
+        preview.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;
+                      background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);
+                      border-radius:6px;margin-bottom:4px;">
+            <img src="${resp.dataUrl}"
+                 style="height:60px;width:80px;object-fit:cover;border-radius:3px;flex-shrink:0;">
+            <span style="color:#34d399;font-size:11px;word-break:break-all;">
+              ✓ ${resp.filename}
+            </span>
+          </div>`;
+        generateStatus.textContent = '';
+      } else {
+        generateStatus.style.color = '#f87171';
+        generateStatus.textContent = '⚠ ' + (resp.error || 'Image generation failed');
+      }
+    } catch (e) {
+      generateStatus.style.color = '#f87171';
+      generateStatus.textContent = '⚠ ' + e.message;
+    } finally {
+      generateBtn.disabled = false;
+      generateBtn.textContent = '✨ Generate Image';
+    }
+  });
+
+  generatePanel.appendChild(promptTextarea);
+  generatePanel.appendChild(providerRow);
+  generatePanel.appendChild(generateBtn);
+  generatePanel.appendChild(generateStatus);
+  wrapper.appendChild(generatePanel);
+
+  function renderResults(items) {
+    grid.innerHTML = '';
+    if (!items.length) {
+      const msg = document.createElement('span');
+      msg.style.cssText = 'color:#8f8fa8;font-size:12px;grid-column:span 4;';
+      msg.textContent = 'No results';
+      grid.appendChild(msg);
+      return;
+    }
+    items.forEach(item => {
+      const img = document.createElement('img');
+      img.src = item.thumb;
+      img.title = item.source + ': ' + item.filename;
+      img.loading = 'lazy';
+      img.style.cssText = `
+        width:100%;height:68px;object-fit:cover;cursor:pointer;
+        border:2px solid transparent;border-radius:5px;
+        transition:border-color 0.12s,opacity 0.12s;
+      `;
+      img.addEventListener('mouseenter', () => {
+        if (img.style.borderColor !== 'rgb(90, 127, 255)') img.style.opacity = '0.8';
+      });
+      img.addEventListener('mouseleave', () => {
+        if (img.style.borderColor !== 'rgb(90, 127, 255)') img.style.opacity = '1';
+      });
+      img.addEventListener('click', async () => {
+        grid.querySelectorAll('img').forEach(i => {
+          i.style.borderColor = 'transparent'; i.style.opacity = '1';
+        });
+        img.style.borderColor = '#5a7fff';
+        hiddenTextarea.value = '';
+        preview.innerHTML = '';
+        statusLine.style.color = '#8f8fa8';
+        statusLine.textContent = 'Storing image in Anki…';
+
+        try {
+          const resp = await chrome.runtime.sendMessage({
+            action: 'storeAnkiImage',
+            url: item.url,
+            filename: item.filename
+          });
+          if (resp.success) {
+            hiddenTextarea.value = `<img src="${resp.filename}">`;
+            preview.innerHTML = `
+              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;
+                          background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);
+                          border-radius:6px;margin-bottom:4px;">
+                <img src="${item.thumb}"
+                     style="height:40px;width:56px;object-fit:cover;border-radius:3px;flex-shrink:0;">
+                <span style="color:#34d399;font-size:11px;word-break:break-all;">
+                  ✓ ${resp.filename}
+                </span>
+              </div>`;
+            statusLine.textContent = '';
+          } else {
+            statusLine.style.color = '#f87171';
+            statusLine.textContent = '⚠ ' + (resp.error || 'Failed to store image');
+          }
+        } catch (e) {
+          statusLine.style.color = '#f87171';
+          statusLine.textContent = '⚠ ' + e.message;
+        }
+      });
+      grid.appendChild(img);
+    });
+  }
+
+  async function doSearch(q) {
+    grid.innerHTML = '';
+    statusLine.style.color = '#8f8fa8';
+    statusLine.textContent = 'Searching…';
+    preview.innerHTML = '';
+    hiddenTextarea.value = '';
+
+    const [wm, ov] = await Promise.all([searchWikimedia(q), searchOpenverse(q)]);
+    lastResults = [...wm, ...ov];
+
+    tabRow.querySelectorAll('button').forEach(b => {
+      const id = b.dataset.tabId;
+      if (id === 'all')       b.textContent = `All (${lastResults.length})`;
+      if (id === 'wikimedia') b.textContent = `Wikimedia (${wm.length})`;
+      if (id === 'openverse') b.textContent = `Openverse (${ov.length})`;
+    });
+
+    const toShow = activeTab === 'all'
+      ? lastResults
+      : lastResults.filter(r => r.source.toLowerCase() === activeTab);
+    renderResults(toShow);
+    statusLine.textContent = lastResults.length
+      ? `${lastResults.length} results from Wikimedia + Openverse`
+      : 'No results found';
+  }
+
+  searchBtn.addEventListener('click', () => {
+    if (searchInput.value.trim()) doSearch(searchInput.value.trim());
+  });
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') searchBtn.click();
+  });
+
+  return { wrapper, searchInput, promptTextarea };
+}
+
+// ── End image search helpers ────────────────────────────────────────────────
+
 function attachAIButtonListeners(getWordsCallback) {
   if (!ankiModal) return;
 
@@ -306,6 +670,7 @@ async function loadModelFields(getWordsCallback) {
       chrome.runtime.sendMessage({ action: 'getSettings' })
     ]);
     const audioFieldName = settingsResponse.settings?.audioFieldName || 'Audio';
+    const imageFieldName = settingsResponse.settings?.imageFieldName || 'Image';
 
     const response = fieldsResponse;
 
@@ -329,9 +694,14 @@ async function loadModelFields(getWordsCallback) {
       const fieldsContainer = ankiModal.querySelector('#anki-fields-container');
       fieldsContainer.textContent = '';
 
+      // Track image picker search inputs and generate prompts so we can pre-fill from target word
+      const imagePickerInputs = [];
+      const imagePickerPrompts = [];
+
       response.fields.forEach(field => {
         const fieldId = field.replace(/[^a-zA-Z0-9]/g, '_');
         const isAudioField = field === audioFieldName;
+        const isImgField = imageFieldName && field === imageFieldName;
 
         const fieldDiv = document.createElement('div');
         fieldDiv.style.marginBottom = '16px';
@@ -341,86 +711,114 @@ async function loadModelFields(getWordsCallback) {
         label.textContent = field;
         fieldDiv.appendChild(label);
 
-        const flexDiv = document.createElement('div');
-        flexDiv.style.cssText = 'display:flex;gap:6px;align-items:flex-start;';
+        if (isImgField) {
+          // ── Image search picker ──────────────────────────────────────────
+          const { wrapper, searchInput, promptTextarea } = createImagePickerField(field, fieldId);
+          fieldDiv.appendChild(wrapper);
+          imagePickerInputs.push(searchInput);
+          imagePickerPrompts.push(promptTextarea);
+        } else {
+          // ── Standard textarea + AI buttons ───────────────────────────────
+          const flexDiv = document.createElement('div');
+          flexDiv.style.cssText = 'display:flex;gap:6px;align-items:flex-start;';
 
-        const textarea = document.createElement('textarea');
-        textarea.id = `anki-field-${fieldId}`;
-        textarea.setAttribute('data-field-name', field);
-        textarea.style.cssText = `
-          flex: 1;
-          min-height: 62px;
-          padding: 8px 11px;
-          border: 1px solid #2c2c3e;
-          border-radius: 6px;
-          font-size: 13.5px;
-          font-family: inherit;
-          resize: vertical;
-          color: #ededf5;
-          background: #1a1a24;
-          outline: none;
-          transition: border-color 0.15s ease, box-shadow 0.15s ease;
-          line-height: 1.5;
-        `;
-        textarea.addEventListener('focus', () => {
-          textarea.style.borderColor = '#5a7fff';
-          textarea.style.boxShadow = '0 0 0 3px rgba(90,127,255,0.14)';
-        });
-        textarea.addEventListener('blur', () => {
-          textarea.style.borderColor = '#2c2c3e';
-          textarea.style.boxShadow = 'none';
-        });
-        flexDiv.appendChild(textarea);
+          const textarea = document.createElement('textarea');
+          textarea.id = `anki-field-${fieldId}`;
+          textarea.setAttribute('data-field-name', field);
+          textarea.style.cssText = `
+            flex: 1;
+            min-height: 62px;
+            padding: 8px 11px;
+            border: 1px solid #2c2c3e;
+            border-radius: 6px;
+            font-size: 13.5px;
+            font-family: inherit;
+            resize: vertical;
+            color: #ededf5;
+            background: #1a1a24;
+            outline: none;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            line-height: 1.5;
+          `;
+          textarea.addEventListener('focus', () => {
+            textarea.style.borderColor = '#5a7fff';
+            textarea.style.boxShadow = '0 0 0 3px rgba(90,127,255,0.14)';
+          });
+          textarea.addEventListener('blur', () => {
+            textarea.style.borderColor = '#2c2c3e';
+            textarea.style.boxShadow = 'none';
+          });
+          flexDiv.appendChild(textarea);
 
-        const aiButtonStyle = `
-          padding: 5px 9px;
-          background: #21212e;
-          color: #8aabff;
-          border: 1px solid #2c2c3e;
-          border-radius: 5px;
-          cursor: pointer;
-          font-size: 11px;
-          font-weight: 500;
-          white-space: nowrap;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          transition: all 0.15s ease;
-          letter-spacing: 0.1px;
-        `;
+          const aiButtonStyle = `
+            padding: 5px 9px;
+            background: #21212e;
+            color: #8aabff;
+            border: 1px solid #2c2c3e;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            letter-spacing: 0.1px;
+          `;
 
-        const buttonDiv = document.createElement('div');
-        buttonDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+          const buttonDiv = document.createElement('div');
+          buttonDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
 
-        const translateBtn = document.createElement('button');
-        translateBtn.className = 'ai-translate-btn';
-        translateBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
-        translateBtn.title = 'Translate sentence to English';
-        translateBtn.style.cssText = aiButtonStyle;
-        translateBtn.textContent = 'AI Translate';
-        buttonDiv.appendChild(translateBtn);
+          const translateBtn = document.createElement('button');
+          translateBtn.className = 'ai-translate-btn';
+          translateBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
+          translateBtn.title = 'Translate sentence to English';
+          translateBtn.style.cssText = aiButtonStyle;
+          translateBtn.textContent = 'AI Translate';
+          buttonDiv.appendChild(translateBtn);
 
-        const defineBtn = document.createElement('button');
-        defineBtn.className = 'ai-define-btn';
-        defineBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
-        defineBtn.title = 'Define unknown word in context';
-        defineBtn.style.cssText = aiButtonStyle;
-        defineBtn.textContent = 'AI Define';
-        buttonDiv.appendChild(defineBtn);
+          const defineBtn = document.createElement('button');
+          defineBtn.className = 'ai-define-btn';
+          defineBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
+          defineBtn.title = 'Define unknown word in context';
+          defineBtn.style.cssText = aiButtonStyle;
+          defineBtn.textContent = 'AI Define';
+          buttonDiv.appendChild(defineBtn);
 
-        if (isAudioField) {
-          const audioBtn = document.createElement('button');
-          audioBtn.className = 'ai-audio-btn';
-          audioBtn.title = 'Generate audio via ElevenLabs TTS';
-          audioBtn.style.cssText = aiButtonStyle;
-          audioBtn.textContent = 'AI Audio';
-          buttonDiv.appendChild(audioBtn);
+          if (isAudioField) {
+            const audioBtn = document.createElement('button');
+            audioBtn.className = 'ai-audio-btn';
+            audioBtn.title = 'Generate audio via ElevenLabs TTS';
+            audioBtn.style.cssText = aiButtonStyle;
+            audioBtn.textContent = 'AI Audio';
+            buttonDiv.appendChild(audioBtn);
+          }
+
+          flexDiv.appendChild(buttonDiv);
+          fieldDiv.appendChild(flexDiv);
         }
 
-        flexDiv.appendChild(buttonDiv);
-        fieldDiv.appendChild(flexDiv);
         fieldsContainer.appendChild(fieldDiv);
       });
+
+      // Pre-fill image search inputs with unknown word(s) from the sentence
+      if (imagePickerInputs.length && currentSentence) {
+        let searchTerm = '';
+        try {
+          const { matureWords, learningWords } = await getWordsCallback();
+          const unknownWords = extractAllUnknownWords(currentSentence, matureWords, learningWords);
+          searchTerm = unknownWords.join(' ');
+        } catch (_) {}
+        // Fall back to first Hebrew word if word lists unavailable
+        if (!searchTerm) {
+          searchTerm = (currentSentence.match(/[֐-׿]+/g) || [])[0] || '';
+        }
+        if (searchTerm) {
+          imagePickerInputs.forEach(inp => { inp.value = searchTerm; });
+          imagePickerPrompts.forEach(ta => { ta.value = searchTerm; });
+        }
+      }
 
       if (response.fields.length > 0) {
         fillSentenceField();
