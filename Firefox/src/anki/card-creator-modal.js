@@ -503,16 +503,18 @@ function createImagePickerField(field, fieldId) {
       const resp = await chrome.runtime.sendMessage({ action, prompt });
       if (resp.success) {
         hiddenTextarea.value = `<img src="${resp.filename}">`;
-        preview.innerHTML = `
-          <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;
-                      background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);
-                      border-radius:6px;margin-bottom:4px;">
-            <img src="${resp.dataUrl}"
-                 style="height:60px;width:80px;object-fit:cover;border-radius:3px;flex-shrink:0;">
-            <span style="color:#34d399;font-size:11px;word-break:break-all;">
-              ✓ ${resp.filename}
-            </span>
-          </div>`;
+        preview.textContent = '';
+        const genDiv = document.createElement('div');
+        genDiv.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:6px;margin-bottom:4px;';
+        const genImg = document.createElement('img');
+        genImg.src = resp.dataUrl;
+        genImg.style.cssText = 'height:60px;width:80px;object-fit:cover;border-radius:3px;flex-shrink:0;';
+        const genSpan = document.createElement('span');
+        genSpan.style.cssText = 'color:#34d399;font-size:11px;word-break:break-all;';
+        genSpan.textContent = `✓ ${resp.filename}`;
+        genDiv.appendChild(genImg);
+        genDiv.appendChild(genSpan);
+        preview.appendChild(genDiv);
         generateStatus.textContent = '';
       } else {
         generateStatus.style.color = '#f87171';
@@ -576,16 +578,18 @@ function createImagePickerField(field, fieldId) {
           });
           if (resp.success) {
             hiddenTextarea.value = `<img src="${resp.filename}">`;
-            preview.innerHTML = `
-              <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;
-                          background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);
-                          border-radius:6px;margin-bottom:4px;">
-                <img src="${item.thumb}"
-                     style="height:40px;width:56px;object-fit:cover;border-radius:3px;flex-shrink:0;">
-                <span style="color:#34d399;font-size:11px;word-break:break-all;">
-                  ✓ ${resp.filename}
-                </span>
-              </div>`;
+            preview.textContent = '';
+            const storeDiv = document.createElement('div');
+            storeDiv.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:6px;margin-bottom:4px;';
+            const storeImg = document.createElement('img');
+            storeImg.src = item.thumb;
+            storeImg.style.cssText = 'height:40px;width:56px;object-fit:cover;border-radius:3px;flex-shrink:0;';
+            const storeSpan = document.createElement('span');
+            storeSpan.style.cssText = 'color:#34d399;font-size:11px;word-break:break-all;';
+            storeSpan.textContent = `✓ ${resp.filename}`;
+            storeDiv.appendChild(storeImg);
+            storeDiv.appendChild(storeSpan);
+            preview.appendChild(storeDiv);
             statusLine.textContent = '';
           } else {
             statusLine.style.color = '#f87171';
