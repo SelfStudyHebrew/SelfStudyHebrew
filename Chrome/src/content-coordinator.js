@@ -9,7 +9,8 @@ let learningWords = [];
 let ignoredWords = [];
 let matureColor = '#ffff00';    // Yellow for mature words
 let learningColor = '#ffa500';  // Orange for learning words
-let sentenceColor = '#5a7fff';  // Blue for i+1 sentences
+let sentenceColor = '#5a7fff';         // Blue for i+1 sentences
+let potentiallyI1Color = '#9b6bff';   // Purple for potentially-i+1 sentences
 let highlightEnabled = true;
 let sentenceHighlightEnabled = true;
 let isHighlighted = false;
@@ -88,6 +89,7 @@ async function initialize() {
       matureColor = settingsData.settings.highlightColor;
       learningColor = settingsData.settings.learningColor;
       sentenceColor = settingsData.settings.sentenceColor || '#5a7fff';
+      potentiallyI1Color = settingsData.settings.potentiallyI1Color || '#9b6bff';
       highlightEnabled = settingsData.settings.highlightEnabled;
       sentenceHighlightEnabled = settingsData.settings.sentenceHighlightEnabled !== false;
     }
@@ -104,7 +106,7 @@ async function initialize() {
     }
 
     if (sentenceHighlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
-      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
+      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
       pageStats.i1Sentences = i1Count;
       pageStats.potentiallyI1Sentences = potentiallyI1Count;
       isSentenceHighlighted = true;
@@ -147,7 +149,7 @@ async function refreshWords() {
       }
 
       if (sentenceHighlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
-        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
+        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
         isSentenceHighlighted = true;
@@ -205,6 +207,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         matureColor = newSettings.highlightColor;
         learningColor = newSettings.learningColor;
         sentenceColor = newSettings.sentenceColor || '#5a7fff';
+        potentiallyI1Color = newSettings.potentiallyI1Color || '#9b6bff';
         const wasEnabled = highlightEnabled;
         const wasSentenceEnabled = sentenceHighlightEnabled;
         highlightEnabled = newSettings.highlightEnabled;
@@ -234,7 +237,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         isHighlighted = true;
       }
       if (sentenceHighlightEnabled) {
-        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
+        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
         isSentenceHighlighted = true;
@@ -265,7 +268,8 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     ignoredWords = request.ignoredWords || ignoredWords;
     matureColor = request.matureColor || matureColor;
     learningColor = request.learningColor || learningColor;
-    sentenceColor = request.sentenceColor || sentenceColor;  // keep existing value if not provided
+    sentenceColor = request.sentenceColor || sentenceColor;
+    potentiallyI1Color = request.potentiallyI1Color || potentiallyI1Color;
     highlightEnabled = request.enabled !== undefined ? request.enabled : highlightEnabled;
     sentenceHighlightEnabled = request.sentenceEnabled !== undefined ? request.sentenceEnabled : sentenceHighlightEnabled;
 
@@ -276,7 +280,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       isHighlighted = true;
     }
     if (sentenceHighlightEnabled) {
-      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
+      const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
       pageStats.i1Sentences = i1Count;
       pageStats.potentiallyI1Sentences = potentiallyI1Count;
       isSentenceHighlighted = true;
@@ -397,7 +401,7 @@ const observer = new MutationObserver((mutations) => {
         if (isSentenceHighlighted) {
           window.removeSentenceHighlights();
         }
-        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords);
+        const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
         isSentenceHighlighted = true;
@@ -501,7 +505,6 @@ function handleSubtitleUpdate(subtitleElement, platform) {
       // Apply border+glow only to unknown words
       subtitleElement.querySelectorAll('.anki-unknown').forEach(span => {
         applyI1Style(span, sentenceColor);
-        span.style.textDecorationColor = sentenceColor;
       });
 
       // Platform-specific sentence styling on all highlighted spans
@@ -524,8 +527,7 @@ function handleSubtitleUpdate(subtitleElement, platform) {
     } else if (isPotentiallyI1) {
       // Apply border+glow only to unknown words
       subtitleElement.querySelectorAll('.anki-unknown').forEach(span => {
-        applyI1Style(span, '#9b6bff');
-        span.style.textDecorationColor = '#9b6bff';
+        applyI1Style(span, potentiallyI1Color);
       });
 
       // Platform-specific sentence styling on all highlighted spans
@@ -691,17 +693,20 @@ if (document.readyState === 'loading') {
         const ignoredWordsLocal = storage.ignoredWords || [];
         const sentenceHighlightEnabledLocal = storage.settings?.sentenceHighlightEnabled !== false;
         const sentenceColorLocal = storage.settings?.sentenceColor || '#5a7fff';
+        const potentiallyI1ColorLocal = storage.settings?.potentiallyI1Color || '#9b6bff';
 
         data.subtitles.forEach((sub) => {
           const item = document.createElement('div');
           item.dataset.index = sub.index;
 
           const isI1 = sentenceHighlightEnabledLocal && window.checkIfI1Sentence(sub.text, matureWordsLocal, learningWordsLocal, ignoredWordsLocal);
+          const isPotentiallyI1 = sentenceHighlightEnabledLocal && !isI1 && window.checkIfPotentiallyI1Sentence(sub.text, matureWordsLocal, learningWordsLocal, ignoredWordsLocal);
 
-          // Parse the hex colour for rgba derivation
-          const r = parseInt(sentenceColorLocal.slice(1, 3), 16);
-          const g = parseInt(sentenceColorLocal.slice(3, 5), 16);
-          const b = parseInt(sentenceColorLocal.slice(5, 7), 16);
+          // Parse the active colour for rgba derivation
+          const activeColor = isI1 ? sentenceColorLocal : (isPotentiallyI1 ? potentiallyI1ColorLocal : null);
+          const r = activeColor ? parseInt(activeColor.slice(1, 3), 16) : 0;
+          const g = activeColor ? parseInt(activeColor.slice(3, 5), 16) : 0;
+          const b = activeColor ? parseInt(activeColor.slice(5, 7), 16) : 0;
 
           item.style.cssText = `
             padding: 10px;
@@ -709,22 +714,25 @@ if (document.readyState === 'loading') {
             border-radius: 4px;
             cursor: pointer;
             transition: border-color 0.2s, box-shadow 0.2s;
-            background: ${isI1 ? `rgba(${r}, ${g}, ${b}, 0.12)` : '#1a1a1a'};
-            border: 1px solid ${isI1 ? `rgba(${r}, ${g}, ${b}, 0.55)` : 'transparent'};
-            box-shadow: ${isI1 ? `0 0 6px rgba(${r}, ${g}, ${b}, 0.18)` : 'none'};
+            background: ${activeColor ? `rgba(${r}, ${g}, ${b}, 0.12)` : '#1a1a1a'};
+            border: 1px solid ${activeColor ? `rgba(${r}, ${g}, ${b}, 0.55)` : 'transparent'};
+            box-shadow: ${activeColor ? `0 0 6px rgba(${r}, ${g}, ${b}, 0.18)` : 'none'};
           `;
 
           if (isI1) {
             item.classList.add('anki-i1-sentence');
             item.title = 'i+1 sentence';
+          } else if (isPotentiallyI1) {
+            item.classList.add('anki-potentially-i1-sentence');
+            item.title = 'Potentially i+1 sentence';
           }
 
           item.addEventListener('mouseenter', () => {
-            item.style.borderColor = `rgba(${r}, ${g}, ${b}, 0.85)`;
+            if (activeColor) item.style.borderColor = `rgba(${r}, ${g}, ${b}, 0.85)`;
           });
 
           item.addEventListener('mouseleave', () => {
-            item.style.borderColor = isI1 ? `rgba(${r}, ${g}, ${b}, 0.55)` : 'transparent';
+            item.style.borderColor = activeColor ? `rgba(${r}, ${g}, ${b}, 0.55)` : 'transparent';
           });
 
           // Timestamp

@@ -21,9 +21,13 @@
     this.currentVideo = null;
     this.comprehensionStats = { total: 0, known: 0, potentiallyKnown: 0, percentage: 0, i1Sentences: 0, potentiallyI1Sentences: 0 };
     this.stripNikudEnabled = false;
+    this.sentenceColor = '#5a7fff';
+    this.potentiallyI1Color = '#9b6bff';
     this.isEnabled = true;
     this.audioContext = null;
     this.audioSourceNode = null;
+    this.selectedSubIndex = null;
+    this.subtitleItems = [];
   }
 
   /**
@@ -555,29 +559,38 @@
     const learningWords = storage.learningWords || [];
     const ignoredWords = storage.ignoredWords || [];
     const sentenceHighlightEnabled = storage.settings?.sentenceHighlightEnabled !== false;
+    const sentenceColorHex = storage.settings?.sentenceColor || '#5a7fff';
+    const potentiallyI1ColorHex = storage.settings?.potentiallyI1Color || '#9b6bff';
+    this.sentenceColor = sentenceColorHex;
+    this.potentiallyI1Color = potentiallyI1ColorHex;
 
     container.innerHTML = '';
+    this.subtitleItems = [];
 
     this.subtitles.forEach((sub, index) => {
       const item = document.createElement('div');
       item.dataset.index = index;
+      this.subtitleItems.push(item);
 
       // Check if this subtitle is i+1 or potentially-i+1
       const isI1Sentence = sentenceHighlightEnabled && window.checkIfI1Sentence(sub.text, matureWords, learningWords, ignoredWords);
       const isPotentiallyI1Sentence = sentenceHighlightEnabled && !isI1Sentence && window.checkIfPotentiallyI1Sentence(sub.text, matureWords, learningWords, ignoredWords);
 
       // Dark-theme appropriate colours for i+1 items
+      const hexToRgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
       let backgroundColor = '#13131a';
       let borderColor = '#2c2c3e';
       let borderLeftAccent = 'transparent';
       if (isI1Sentence) {
-        backgroundColor = 'rgba(90,127,255,0.10)';
-        borderColor = 'rgba(90,127,255,0.30)';
-        borderLeftAccent = '#5a7fff';
+        const [r,g,b] = hexToRgb(sentenceColorHex);
+        backgroundColor = `rgba(${r},${g},${b},0.10)`;
+        borderColor = `rgba(${r},${g},${b},0.30)`;
+        borderLeftAccent = sentenceColorHex;
       } else if (isPotentiallyI1Sentence) {
-        backgroundColor = 'rgba(155,107,255,0.10)';
-        borderColor = 'rgba(155,107,255,0.28)';
-        borderLeftAccent = '#9b6bff';
+        const [r,g,b] = hexToRgb(potentiallyI1ColorHex);
+        backgroundColor = `rgba(${r},${g},${b},0.10)`;
+        borderColor = `rgba(${r},${g},${b},0.28)`;
+        borderLeftAccent = potentiallyI1ColorHex;
       }
 
       // Use inset box-shadow for left accent — avoids any border-width conflicts
@@ -616,38 +629,67 @@
 
       // Add click handlers
       item.addEventListener('click', async (e) => {
-        // Shift+click opens card creator for any subtitle
+        // Shift+click: multi-subtitle selection or single-card creation
         if (e.shiftKey && window.openAnkiModal) {
           e.preventDefault();
           e.stopPropagation();
 
-          // Clear any existing text selection
           if (window.getSelection) {
             window.getSelection().removeAllRanges();
           }
 
-          // Record audio for this subtitle
-          const audioFilename = await this.recordSubtitleAudio(sub);
+          // No anchor yet — set this subtitle as anchor
+          if (this.selectedSubIndex === null) {
+            this.selectedSubIndex = index;
+            item.style.outline = '2px solid #f59e0b';
+            item.style.outlineOffset = '-2px';
+            item.title = 'Shift+Click another subtitle to combine, or Shift+Click here again to create card';
+            return;
+          }
 
-          // Provide callback to get word lists from storage
-          const getWordsCallback = async () => {
-            const data = await chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords']);
-            return {
-              matureWords: data.matureWords || [],
-              learningWords: data.learningWords || [],
-              ignoredWords: data.ignoredWords || []
+          // Clicked same subtitle again — clear anchor, open single-subtitle card
+          if (this.selectedSubIndex === index) {
+            this._clearSubtitleSelection();
+            const audioResult = await this.recordSubtitleAudio(sub);
+            const getWordsCallback = async () => {
+              const data = await browser.storage.local.get(['matureWords', 'learningWords', 'ignoredWords']);
+              return { matureWords: data.matureWords || [], learningWords: data.learningWords || [], ignoredWords: data.ignoredWords || [] };
             };
-          };
+            const sentenceText = window.stripNikud(sub.text, this.stripNikudEnabled);
+            const wasPlaying = this.currentVideo && !this.currentVideo.paused;
+            if (wasPlaying) this.currentVideo.pause();
+            const onClose = wasPlaying ? () => { this.currentVideo?.play(); } : null;
+            window.openAnkiModal(sentenceText, getWordsCallback, audioResult?.filename || null, audioResult?.blobUrl || null, onClose);
+            return;
+          }
 
-          // Use stripped version if nikud stripping is enabled
-          const sentenceText = window.stripNikud(sub.text, this.stripNikudEnabled);
-          window.openAnkiModal(sentenceText, getWordsCallback, audioFilename);
+          // Different subtitle — combine range
+          const anchorIdx = this.selectedSubIndex;
+          this._clearSubtitleSelection();
+          const minIdx = Math.min(anchorIdx, index);
+          const maxIdx = Math.max(anchorIdx, index);
+          const rangedSubs = this.subtitles.slice(minIdx, maxIdx + 1);
+          const mergedText = rangedSubs.map(s => window.stripNikud(s.text, this.stripNikudEnabled)).join(' ');
+          const mergedAudioSub = { startTime: this.subtitles[minIdx].startTime, endTime: this.subtitles[maxIdx].endTime };
+          const audioResult = await this.recordSubtitleAudio(mergedAudioSub);
+          const getWordsCallback = async () => {
+            const data = await browser.storage.local.get(['matureWords', 'learningWords', 'ignoredWords']);
+            return { matureWords: data.matureWords || [], learningWords: data.learningWords || [], ignoredWords: data.ignoredWords || [] };
+          };
+          const wasPlaying = this.currentVideo && !this.currentVideo.paused;
+          if (wasPlaying) this.currentVideo.pause();
+          const onClose = wasPlaying ? () => { this.currentVideo?.play(); } : null;
+          window.openAnkiModal(mergedText, getWordsCallback, audioResult?.filename || null, audioResult?.blobUrl || null, onClose);
           return;
         }
 
-        // Regular click seeks to time (if enabled)
+        // Regular click: clear any pending selection, then seek
+        if (this.selectedSubIndex !== null) {
+          this._clearSubtitleSelection();
+          return;
+        }
+
         if (this.enableClickToSeek !== false && this.currentVideo) {
-          // Use platform-specific seek if available, otherwise direct seek
           if (typeof this.seekToTime === 'function') {
             await this.seekToTime(sub.startTime);
           } else {
@@ -727,6 +769,26 @@
 
       container.appendChild(item);
     });
+  }
+
+  /**
+   * Clear the multi-subtitle anchor selection, restoring item styles
+   */
+  _clearSubtitleSelection() {
+    if (this.selectedSubIndex !== null && this.subtitleItems[this.selectedSubIndex]) {
+      const anchorItem = this.subtitleItems[this.selectedSubIndex];
+      anchorItem.style.outline = '';
+      anchorItem.style.outlineOffset = '';
+      // Restore original title
+      if (anchorItem.classList.contains('anki-i1-sentence')) {
+        anchorItem.title = 'i+1 sentence - Shift+Click to create Anki card';
+      } else if (anchorItem.classList.contains('anki-potentially-i1-sentence')) {
+        anchorItem.title = 'Potentially i+1 sentence - Shift+Click to create Anki card';
+      } else {
+        anchorItem.title = 'Click to seek | Shift+Click to create Anki card';
+      }
+    }
+    this.selectedSubIndex = null;
   }
 
   /**
@@ -820,7 +882,7 @@
             const isPotentiallyI1 = item.classList.contains('anki-potentially-i1-sentence');
 
             if (i === foundIndex) {
-              item.style.borderColor = '#5a7fff';
+              item.style.borderColor = isI1 ? this.sentenceColor : (isPotentiallyI1 ? this.potentiallyI1Color : this.sentenceColor);
               if (!isI1 && !isPotentiallyI1) item.style.background = '#1a1a24';
               item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
@@ -1000,6 +1062,9 @@
       const audioBlob = await recordingPromise;
       console.log(`[${this.platformName} Subs] Audio blob created, size: ${audioBlob.size} bytes`);
 
+      // Create a blob URL for in-browser playback (revoked when modal closes)
+      const blobUrl = URL.createObjectURL(audioBlob);
+
       // Small delay to let MediaRecorder fully release resources
       await new Promise(resolve => setTimeout(resolve, 100));
 
@@ -1016,7 +1081,7 @@
 
       // Generate filename using timestamp and first few words
       const timestamp = Date.now();
-      const textPreview = subtitle.text.split(' ').slice(0, 3).join('_').replace(/[^\u0590-\u05FF\w]/g, '');
+      const textPreview = (subtitle.text || '').split(' ').slice(0, 3).join('_').replace(/[^\u0590-\u05FF\w]/g, '');
       const filename = `subtitle_${timestamp}_${textPreview}.webm`;
 
       console.log(`[${this.platformName} Subs] Storing audio in Anki as: ${filename}`);
@@ -1036,9 +1101,10 @@
 
       if (response && response.success) {
         console.log(`[${this.platformName} Subs] Audio successfully stored in Anki`);
-        return filename;
+        return { filename, blobUrl };
       } else {
         console.error(`[${this.platformName} Subs] Failed to store audio in Anki:`, response?.error);
+        URL.revokeObjectURL(blobUrl);
         return null;
       }
 
@@ -1070,6 +1136,8 @@
     }
     this.subtitles = [];
     this.currentSubtitleIndex = -1;
+    this.subtitleItems = [];
+    this.selectedSubIndex = null;
     this.currentVideo = null;
   }
 }

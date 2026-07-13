@@ -18,24 +18,29 @@ CRITICAL CONSTRAINTS:
 
 OUTPUT FORMAT: Return ONLY {{COUNT}} Hebrew sentences, one per line, nothing else.`;
 
+const DEFAULT_TRANSLATE_PROMPT = `Translate this Hebrew sentence into natural English.{{CONTEXT}}\n\nHebrew: {{SENTENCE}}\nEnglish:`;
+
 const DEFAULT_DEFINE_PROMPT = `Hebrew sentence: {{SENTENCE}}
 
 Define the word "{{WORD}}" as it appears in that sentence.
 
+If the word includes a bound prefix (ש, ב, ל, ו, מ, כ, ה), define the base word using the standard format below. Under MEANING, note the prefix and its contribution briefly, e.g. "people / men (here: שֶׁ + אֲנָשִׁים = 'that people')".
+
 Use exactly this HTML format — bold each label, each entry on its own line with no blank lines:
 
 <b>TYPE:</b> [part of speech — Verb / Noun / Adjective / Adverb / Preposition / Conjunction / Pronoun / Particle / etc.]
-<b>ROOT:</b> [Hebrew root letters separated by dashes, e.g. פ - ת - ח]
-<b>MEANING:</b> [core meaning(s), including all persons/genders/numbers the form covers where relevant, e.g. "is opened / has been opened"]
+<b>ROOT:</b> [Hebrew root letters separated by dashes, e.g. פ - ת - ח, or N/A for particles and function words]
+<b>MEANING:</b> [list the main meanings of this word form; include gender/number/person where relevant]
+<b>CONTEXT:</b> [what the word means specifically in this sentence — literal, idiomatic, emotional, etc.]
 
-If the word is a verb, add these two lines immediately after MEANING:
-<b>TENSE:</b> [Present / Past / Future / Imperative, plus person/gender/number where applicable]
-<b>INFINITIVE:</b> [infinitive form in Hebrew followed by its English meaning in parentheses, e.g. להיפתח (To Be Opened)]
+If the word is a Verb, add these three lines immediately after MEANING (before CONTEXT):
+<b>TENSE:</b> [Present / Past / Future / Imperative, plus person/gender/number]
+<b>BINYAN:</b> [פָּעַל / פִּיעֵל / פּוּעַל / הִפְעִיל / הֻפְעַל / הִתְפַּעֵל / נִפְעַל]
+<b>INFINITIVE:</b> [infinitive form in Hebrew followed by English meaning in parentheses, e.g. לִפְתֹּחַ (to open)]
 
-Then always end with:
-<b>CONTEXT:</b> [what the word means specifically in this sentence — emotional, literal, idiomatic, etc.]
+If the word is a Noun or Adjective, add this line immediately after MEANING (before CONTEXT):
+<b>LEMMA:</b> [base dictionary form — masculine singular for adjectives, absolute singular for nouns — with gender, e.g. בַּיִת (m)]
 
-If context alone cannot disambiguate between multiple distinct meanings, list each possibility under MEANING before giving the best-guess CONTEXT.
 Output only the formatted definition — no preamble, no explanation.`;
 
 // DOM elements
@@ -58,6 +63,8 @@ const sentenceGenerationPromptInput = document.getElementById('sentence-generati
 const resetPromptBtn = document.getElementById('reset-prompt-btn');
 const aiDefinePromptInput = document.getElementById('ai-define-prompt');
 const resetDefinePromptBtn = document.getElementById('reset-define-prompt-btn');
+const aiTranslatePromptInput = document.getElementById('ai-translate-prompt');
+const resetTranslatePromptBtn = document.getElementById('reset-translate-prompt-btn');
 const spendTotal = document.getElementById('spend-total');
 const resetSpendBtn = document.getElementById('reset-spend-btn');
 const defaultDeckSelect = document.getElementById('default-deck');
@@ -66,6 +73,10 @@ const audioFieldNameInput = document.getElementById('audio-field-name');
 const imageFieldNameInput = document.getElementById('image-field-name');
 const sentenceColorInput = document.getElementById('sentence-color');
 const sentenceColorText = document.getElementById('sentence-color-text');
+const resetSentenceColorBtn = document.getElementById('reset-sentence-color-btn');
+const potentiallyI1ColorInput = document.getElementById('potentially-i1-color');
+const potentiallyI1ColorText = document.getElementById('potentially-i1-color-text');
+const resetPotentiallyI1ColorBtn = document.getElementById('reset-potentially-i1-color-btn');
 const sentenceHighlightEnabled = document.getElementById('sentence-highlight-enabled');
 const stripNikudEnabled = document.getElementById('strip-nikud-enabled');
 const fieldNameInput = document.getElementById('field-name');
@@ -81,17 +92,12 @@ const setupAnkiBtn = document.getElementById('setup-anki-btn');
 const refreshWordsBtn = document.getElementById('refresh-words-btn');
 const clearCacheBtn = document.getElementById('clear-cache-btn');
 const clearDictionaryBtn = document.getElementById('clear-dictionary-btn');
-const exportDefinitionsBtn = document.getElementById('export-definitions-btn');
-const importDefinitionsBtn = document.getElementById('import-definitions-btn');
-const importDefinitionsFile = document.getElementById('import-definitions-file');
 const exportWordsBtn = document.getElementById('export-words-btn');
 const bulkImportBtn = document.getElementById('bulk-import-btn');
 const bulkImportFile = document.getElementById('bulk-import-file');
 const bulkImportTextarea = document.getElementById('bulk-import-textarea');
 const bulkImportTextBtn = document.getElementById('bulk-import-text-btn');
 const clearTextareaBtn = document.getElementById('clear-textarea-btn');
-const autoExportEnabled = document.getElementById('auto-export-enabled');
-const autoExportFilename = document.getElementById('auto-export-filename');
 const saveBtn = document.getElementById('save-btn');
 const statusMessage = document.getElementById('status-message');
 
@@ -140,12 +146,26 @@ function showStatus(message, isError = false) {
 sentenceColorInput.addEventListener('input', (e) => {
   sentenceColorText.value = e.target.value;
 });
-
 sentenceColorText.addEventListener('input', (e) => {
   const color = e.target.value;
-  if (/^#[0-9A-F]{6}$/i.test(color)) {
-    sentenceColorInput.value = color;
-  }
+  if (/^#[0-9A-F]{6}$/i.test(color)) sentenceColorInput.value = color;
+});
+resetSentenceColorBtn.addEventListener('click', () => {
+  sentenceColorInput.value = '#5a7fff';
+  sentenceColorText.value = '#5a7fff';
+});
+
+// Sync color inputs for potentially-i+1 color
+potentiallyI1ColorInput.addEventListener('input', (e) => {
+  potentiallyI1ColorText.value = e.target.value;
+});
+potentiallyI1ColorText.addEventListener('input', (e) => {
+  const color = e.target.value;
+  if (/^#[0-9A-F]{6}$/i.test(color)) potentiallyI1ColorInput.value = color;
+});
+resetPotentiallyI1ColorBtn.addEventListener('click', () => {
+  potentiallyI1ColorInput.value = '#9b6bff';
+  potentiallyI1ColorText.value = '#9b6bff';
 });
 
 // Display word list
@@ -265,12 +285,13 @@ async function loadSettings() {
       maxWordsI1Input.value = settings.maxWordsForI1 || 3000;
       sentenceGenerationPromptInput.value = settings.sentenceGenerationPrompt || DEFAULT_SENTENCE_PROMPT;
       aiDefinePromptInput.value = settings.aiDefinePrompt || DEFAULT_DEFINE_PROMPT;
+      aiTranslatePromptInput.value = settings.aiTranslatePrompt || DEFAULT_TRANSLATE_PROMPT;
       sentenceColorInput.value = settings.sentenceColor || '#5a7fff';
       sentenceColorText.value = settings.sentenceColor || '#5a7fff';
+      potentiallyI1ColorInput.value = settings.potentiallyI1Color || '#9b6bff';
+      potentiallyI1ColorText.value = settings.potentiallyI1Color || '#9b6bff';
       sentenceHighlightEnabled.checked = settings.sentenceHighlightEnabled !== false;
       stripNikudEnabled.checked = settings.stripNikudEnabled || false;
-      autoExportEnabled.checked = settings.autoExportEnabled || false;
-      autoExportFilename.value = settings.autoExportFilename || 'selfstudyhebrew-custom-definitions.json';
       audioFieldNameInput.value = settings.audioFieldName || 'Audio';
       imageFieldNameInput.value = settings.imageFieldName || 'Image';
       fieldNameInput.value = settings.fieldName;
@@ -357,10 +378,14 @@ async function saveSettings() {
       return;
     }
 
-    // Validate sentence color
+    // Validate sentence colors
     const sentenceColor = sentenceColorText.value;
     if (!/^#[0-9A-F]{6}$/i.test(sentenceColor)) {
-      showStatus('Invalid color format. Use hex format like #5a7fff', true);
+      showStatus('Invalid i+1 color format. Use hex format like #5a7fff', true);
+      return;
+    }
+    if (!/^#[0-9A-F]{6}$/i.test(potentiallyI1ColorText.value)) {
+      showStatus('Invalid potentially i+1 color format. Use hex format like #9b6bff', true);
       return;
     }
 
@@ -385,15 +410,15 @@ async function saveSettings() {
     settings.maxWordsForI1 = parseInt(maxWordsI1Input.value) || 3000;
     settings.sentenceGenerationPrompt = sentenceGenerationPromptInput.value.trim() || DEFAULT_SENTENCE_PROMPT;
     settings.aiDefinePrompt = aiDefinePromptInput.value.trim() || DEFAULT_DEFINE_PROMPT;
+    settings.aiTranslatePrompt = aiTranslatePromptInput.value.trim() || DEFAULT_TRANSLATE_PROMPT;
     settings.defaultDeck = defaultDeckSelect.value;
     settings.defaultNoteType = defaultNoteTypeSelect.value;
     settings.audioFieldName = audioFieldNameInput.value.trim() || 'Audio';
     settings.imageFieldName = imageFieldNameInput.value.trim() || 'Image';
     settings.sentenceColor = sentenceColor;
+    settings.potentiallyI1Color = potentiallyI1ColorText.value;
     settings.sentenceHighlightEnabled = sentenceHighlightEnabled.checked;
     settings.stripNikudEnabled = stripNikudEnabled.checked;
-    settings.autoExportEnabled = autoExportEnabled.checked;
-    settings.autoExportFilename = autoExportFilename.value.trim() || 'selfstudyhebrew-custom-definitions.json';
     settings.fieldName = fieldName;
     settings.deckFilter = deckFilterInput.value.trim();
     settings.matureThreshold = parseInt(matureThresholdInput.value) || 21;
@@ -436,7 +461,7 @@ async function refreshWords() {
   refreshWordsBtn.innerHTML = '<span class="spinner"></span> Refreshing...';
 
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'fetchWords' });
+    const response = await chrome.runtime.sendMessage({ action: 'refreshWords' });
 
     if (response.success) {
       allMatureWords = response.matureWords || [];
@@ -551,89 +576,6 @@ filterLearning.addEventListener('click', () => {
   filterMature.classList.remove('active');
   displayWordList(wordSearch.value.trim());
 });
-
-// Export custom definitions
-async function exportCustomDefinitions() {
-  exportDefinitionsBtn.disabled = true;
-  exportDefinitionsBtn.textContent = 'Exporting...';
-
-  try {
-    const result = await chrome.storage.local.get('customDefinitions');
-    const customDefinitions = result.customDefinitions || {};
-
-    const count = Object.keys(customDefinitions).length;
-    if (count === 0) {
-      showStatus('No custom definitions to export', true);
-      return;
-    }
-
-    // Create JSON file
-    const dataStr = JSON.stringify(customDefinitions, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    // Create download link
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `selfstudyhebrew-custom-definitions-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
-    showStatus(`Exported ${count} custom definition(s)`);
-  } catch (error) {
-    console.error('Error exporting custom definitions:', error);
-    showStatus('Error exporting custom definitions', true);
-  } finally {
-    exportDefinitionsBtn.disabled = false;
-    exportDefinitionsBtn.textContent = 'Export Custom Definitions';
-  }
-}
-
-// Import custom definitions
-async function importCustomDefinitions(file) {
-  try {
-    const text = await file.text();
-    const importedDefs = JSON.parse(text);
-
-    // Validate structure
-    if (typeof importedDefs !== 'object' || importedDefs === null) {
-      showStatus('Invalid file format', true);
-      return;
-    }
-
-    // Get existing custom definitions
-    const result = await chrome.storage.local.get('customDefinitions');
-    const existingDefs = result.customDefinitions || {};
-
-    // Merge imported definitions with existing ones
-    let addedCount = 0;
-    for (const [word, definitions] of Object.entries(importedDefs)) {
-      if (!Array.isArray(definitions)) continue;
-
-      if (!existingDefs[word]) {
-        existingDefs[word] = [];
-      }
-
-      // Add new definitions that don't already exist
-      for (const def of definitions) {
-        if (!existingDefs[word].includes(def)) {
-          existingDefs[word].push(def);
-          addedCount++;
-        }
-      }
-    }
-
-    // Save merged definitions
-    await chrome.storage.local.set({ customDefinitions: existingDefs });
-
-    showStatus(`Imported ${addedCount} custom definition(s)`);
-  } catch (error) {
-    console.error('Error importing custom definitions:', error);
-    showStatus('Error importing custom definitions: Invalid file', true);
-  }
-}
 
 // Export known words
 async function exportKnownWords() {
@@ -861,7 +803,6 @@ testConnectionBtn.addEventListener('click', testConnection);
 refreshWordsBtn.addEventListener('click', refreshWords);
 clearCacheBtn.addEventListener('click', clearCache);
 clearDictionaryBtn.addEventListener('click', clearDictionary);
-exportDefinitionsBtn.addEventListener('click', exportCustomDefinitions);
 exportWordsBtn.addEventListener('click', exportKnownWords);
 bulkImportBtn.addEventListener('click', () => {
   bulkImportFile.click();
@@ -880,17 +821,6 @@ clearTextareaBtn.addEventListener('click', () => {
   statusMessage.textContent = 'Text box cleared';
   statusMessage.className = 'status-message success';
 });
-importDefinitionsBtn.addEventListener('click', () => {
-  importDefinitionsFile.click();
-});
-importDefinitionsFile.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    importCustomDefinitions(file);
-    // Reset file input so same file can be imported again
-    e.target.value = '';
-  }
-});
 saveBtn.addEventListener('click', saveSettings);
 
 resetPromptBtn.addEventListener('click', () => {
@@ -899,6 +829,10 @@ resetPromptBtn.addEventListener('click', () => {
 
 resetDefinePromptBtn.addEventListener('click', () => {
   aiDefinePromptInput.value = DEFAULT_DEFINE_PROMPT;
+});
+
+resetTranslatePromptBtn.addEventListener('click', () => {
+  aiTranslatePromptInput.value = DEFAULT_TRANSLATE_PROMPT;
 });
 
 // Allow saving with Enter key in text fields

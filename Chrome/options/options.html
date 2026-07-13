@@ -117,6 +117,13 @@
         <textarea id="ai-define-prompt" rows="18" style="width:100%; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
         <button type="button" id="reset-define-prompt-btn" style="margin-top: 8px;">Reset to Default</button>
       </div>
+
+      <div class="setting-item">
+        <label for="ai-translate-prompt">AI Translate Prompt</label>
+        <p class="description">The prompt sent to Claude when translating a sentence. Use <code>{{SENTENCE}}</code> and <code>{{CONTEXT}}</code> as placeholders. The system message (output translation only) is always applied.</p>
+        <textarea id="ai-translate-prompt" rows="6" style="width:100%; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+        <button type="button" id="reset-translate-prompt-btn" style="margin-top: 8px;">Reset to Default</button>
+      </div>
     </div>
 
     <div class="settings-section">
@@ -157,10 +164,21 @@
       <div class="setting-item">
         <label for="sentence-color">i+1 Sentence Background Color</label>
         <div class="input-group">
-          <input type="color" id="sentence-color" value="#add8e6">
-          <input type="text" id="sentence-color-text" value="#add8e6" maxlength="7">
+          <input type="color" id="sentence-color" value="#5a7fff">
+          <input type="text" id="sentence-color-text" value="#5a7fff" maxlength="7">
+          <button type="button" id="reset-sentence-color-btn" style="font-size:12px;padding:4px 10px;margin-left:6px;">Reset</button>
         </div>
         <p class="description">Background color for sentences with exactly 1 unknown Hebrew word</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="potentially-i1-color">Potentially i+1 Sentence Background Color</label>
+        <div class="input-group">
+          <input type="color" id="potentially-i1-color" value="#9b6bff">
+          <input type="text" id="potentially-i1-color-text" value="#9b6bff" maxlength="7">
+          <button type="button" id="reset-potentially-i1-color-btn" style="font-size:12px;padding:4px 10px;margin-left:6px;">Reset</button>
+        </div>
+        <p class="description">Background color for sentences with 1 potentially-known word (prefix detected) and 0–1 unknown words</p>
       </div>
 
       <div class="setting-item">
@@ -245,7 +263,9 @@
           <li><strong>Already Known</strong> deck - for marking words you already know</li>
           <li><strong>Ignored</strong> deck - for words to exclude from highlighting and i+1 detection</li>
           <li><strong>Sentence Mining</strong> deck - for storing sentences from subtitles</li>
+          <li><strong>SSH Custom Definitions</strong> deck - for storing your custom word definitions</li>
           <li><strong>SelfStudyHebrew</strong> note type - with fields: Hebrew, English, Notes, Audio, Image</li>
+          <li><strong>SSH-CustomDefinition</strong> note type - with fields: Word, Definition</li>
         </ul>
         <p style="margin: 5px 0 0 0; color: #888; font-size: 13px;">If they already exist, they won't be modified.</p>
       </div>
@@ -269,35 +289,6 @@
         <button id="clear-dictionary-btn" class="btn btn-danger">
           Clear Dictionary Cache
         </button>
-      </div>
-    </div>
-
-    <div class="settings-section">
-      <h2>Custom Definitions Backup</h2>
-      <p class="description">Export your custom definitions to save them, or import previously exported definitions. This allows you to keep your custom definitions even if you remove the extension.</p>
-
-      <div class="setting-item">
-        <label for="auto-export-enabled">
-          <input type="checkbox" id="auto-export-enabled">
-          Auto-export on every change
-        </label>
-        <p class="description">Automatically export custom definitions to your Downloads folder whenever you add a new one</p>
-      </div>
-
-      <div class="setting-item">
-        <label for="auto-export-filename">Auto-export filename</label>
-        <input type="text" id="auto-export-filename" value="selfstudyhebrew-custom-definitions.json" placeholder="selfstudyhebrew-custom-definitions.json">
-        <p class="description">Filename for auto-exported custom definitions (saved to Downloads folder). Will overwrite previous exports.</p>
-      </div>
-
-      <div class="actions">
-        <button id="export-definitions-btn" class="btn btn-secondary">
-          Export Custom Definitions
-        </button>
-        <button id="import-definitions-btn" class="btn btn-secondary">
-          Import Custom Definitions
-        </button>
-        <input type="file" id="import-definitions-file" accept=".json" style="display: none;">
       </div>
     </div>
 

@@ -264,34 +264,13 @@
         const isI1 = item.classList.contains('anki-i1-sentence');
         const isPotentiallyI1 = item.classList.contains('anki-potentially-i1-sentence');
 
-        // Border+glow colours matching the design system
-        const i1Color   = { r: 90,  g: 127, b: 255 }; // #5a7fff
-        const pi1Color  = { r: 155, g: 107, b: 255 }; // #9b6bff
-        const activeCol = isI1 ? i1Color : isPotentiallyI1 ? pi1Color : null;
-
         if (i === index) {
-          if (activeCol) {
-            const {r, g, b} = activeCol;
-            item.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.18)`;
-            item.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.75)`;
-            item.style.boxShadow = `0 0 8px rgba(${r}, ${g}, ${b}, 0.25)`;
-          } else {
-            item.style.backgroundColor = '#4f4f4f';
-            item.style.border = '1px solid transparent';
-            item.style.boxShadow = 'none';
-          }
+          item.style.borderColor = isI1 ? this.sentenceColor : (isPotentiallyI1 ? this.potentiallyI1Color : this.sentenceColor);
+          if (!isI1 && !isPotentiallyI1) item.style.background = '#1a1a24';
           item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else {
-          if (activeCol) {
-            const {r, g, b} = activeCol;
-            item.style.backgroundColor = `rgba(${r}, ${g}, ${b}, 0.12)`;
-            item.style.border = `1px solid rgba(${r}, ${g}, ${b}, 0.55)`;
-            item.style.boxShadow = `0 0 6px rgba(${r}, ${g}, ${b}, 0.18)`;
-          } else {
-            item.style.backgroundColor = '#1a1a1a';
-            item.style.border = '1px solid transparent';
-            item.style.boxShadow = 'none';
-          }
+          item.style.borderColor = item.dataset.borderColor;
+          item.style.background = item.dataset.bgColor;
         }
       });
     }

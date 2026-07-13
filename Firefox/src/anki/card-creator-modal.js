@@ -8,6 +8,8 @@ let ankiModal = null;
 let currentSentence = null;
 let currentAudioFilename = null;
 let currentAudioBlobUrl = null;
+let pendingGeneratedImage = null; // Holds generated image data until card is actually created
+let onModalCloseCallback = null;
 
 function showModalError(message) {
   if (!ankiModal) return;
@@ -63,6 +65,11 @@ function extractAllUnknownWords(sentence, matureWords, learningWords) {
   return unknownWords;
 }
 
+function getAIContext() {
+  const el = ankiModal && ankiModal.querySelector('#anki-ai-context');
+  return el ? el.value.trim() : '';
+}
+
 function getSourceText() {
   let sourceText = currentSentence;
   const allTextareas = ankiModal.querySelectorAll('[data-field-name]');
@@ -101,7 +108,8 @@ async function handleTranslate(button) {
   try {
     const response = await chrome.runtime.sendMessage({
       action: 'translateSentence',
-      sentence: sourceText
+      sentence: sourceText,
+      context: getAIContext()
     });
 
     if (response.success) {
@@ -153,7 +161,8 @@ async function handleDefine(button, getWordsCallback) {
     const response = await chrome.runtime.sendMessage({
       action: 'defineWords',
       words: unknownWords,
-      sentence: sourceText
+      sentence: sourceText,
+      context: getAIContext()
     });
 
     if (response.success) {
@@ -274,6 +283,253 @@ async function handleGenerateAudio(button) {
   }
 }
 
+// ── Audio trim helpers ───────────────────────────────────────────────────────
+
+function _wavWriteStr(view, offset, str) {
+  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+}
+
+function audioBufferToWav(buffer) {
+  const ch = buffer.numberOfChannels, sr = buffer.sampleRate, len = buffer.length;
+  const dataLen = len * ch * 2;
+  const ab = new ArrayBuffer(44 + dataLen);
+  const v = new DataView(ab);
+  _wavWriteStr(v, 0, 'RIFF'); v.setUint32(4, 36 + dataLen, true);
+  _wavWriteStr(v, 8, 'WAVE'); _wavWriteStr(v, 12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, ch, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * ch * 2, true);
+  v.setUint16(32, ch * 2, true); v.setUint16(34, 16, true);
+  _wavWriteStr(v, 36, 'data'); v.setUint32(40, dataLen, true);
+  let offset = 44;
+  for (let i = 0; i < len; i++) {
+    for (let c = 0; c < ch; c++) {
+      const s = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i]));
+      v.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+  }
+  return new Blob([ab], { type: 'audio/wav' });
+}
+
+async function trimAudioBuffer(audioBuffer, startTime, endTime) {
+  const sr = audioBuffer.sampleRate, ch = audioBuffer.numberOfChannels;
+  const startSample = Math.floor(startTime * sr);
+  const length = Math.floor((endTime - startTime) * sr);
+  const offCtx = new OfflineAudioContext(ch, length, sr);
+  const src = offCtx.createBufferSource();
+  src.buffer = audioBuffer;
+  src.connect(offCtx.destination);
+  src.start(0, startTime, endTime - startTime);
+  const rendered = await offCtx.startRendering();
+  return audioBufferToWav(rendered);
+}
+
+function showAudioTrimPanel(audioTextarea) {
+  const existing = ankiModal.querySelector('#audio-trim-panel');
+  if (existing) { existing.remove(); return; }
+  if (!currentAudioBlobUrl) return;
+
+  const panel = document.createElement('div');
+  panel.id = 'audio-trim-panel';
+  panel.style.cssText = 'margin-top:8px;background:#13131a;border:1px solid #2c2c3e;border-radius:8px;padding:12px;';
+
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'width:100%;height:64px;border-radius:4px;display:block;cursor:ew-resize;touch-action:none;';
+  panel.appendChild(canvas);
+
+  const timeDisplay = document.createElement('div');
+  timeDisplay.style.cssText = 'color:#8f8fa8;font-size:11px;margin-top:6px;text-align:center;font-variant-numeric:tabular-nums;';
+  timeDisplay.textContent = 'Loading audio…';
+  panel.appendChild(timeDisplay);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;margin-top:10px;';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'padding:5px 12px;background:#21212e;color:#8f8fa8;border:1px solid #2c2c3e;border-radius:5px;cursor:pointer;font-size:12px;';
+  cancelBtn.addEventListener('click', () => {
+    if (testSource) { try { testSource.stop(); } catch(_) {} }
+    if (testCtx && testCtx.state !== 'closed') testCtx.close();
+    panel.remove();
+  });
+  const testBtn = document.createElement('button');
+  testBtn.textContent = '▶ Test';
+  testBtn.style.cssText = 'padding:5px 12px;background:#21212e;color:#8aabff;border:1px solid #2c2c3e;border-radius:5px;cursor:pointer;font-size:12px;';
+  const applyBtn = document.createElement('button');
+  applyBtn.textContent = '✂ Apply Trim';
+  applyBtn.style.cssText = 'padding:5px 12px;background:rgba(52,211,153,0.12);color:#34d399;border:1px solid rgba(52,211,153,0.28);border-radius:5px;cursor:pointer;font-size:12px;';
+  btnRow.appendChild(cancelBtn);
+  btnRow.appendChild(testBtn);
+  btnRow.appendChild(applyBtn);
+  panel.appendChild(btnRow);
+
+  const flexRow = audioTextarea.parentNode;
+  flexRow.parentNode.insertBefore(panel, flexRow.nextSibling);
+
+  // State
+  let audioBuffer = null;
+  let startFraction = 0;
+  let endFraction = 1;
+  let dragging = null;
+  const HIT = 12;
+
+  function toFraction(clientX) {
+    const r = canvas.getBoundingClientRect();
+    return Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+  }
+
+  function updateTimeDisplay() {
+    if (!audioBuffer) return;
+    const d = audioBuffer.duration;
+    const s = (startFraction * d).toFixed(2);
+    const e = (endFraction * d).toFixed(2);
+    const t = ((endFraction - startFraction) * d).toFixed(2);
+    timeDisplay.textContent = `Start: ${s}s  ·  End: ${e}s  ·  Duration: ${t}s`;
+  }
+
+  function drawWaveform() {
+    if (!audioBuffer) return;
+    const dpr = window.devicePixelRatio || 1;
+    const r = canvas.getBoundingClientRect();
+    canvas.width = r.width * dpr;
+    canvas.height = r.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const w = r.width, h = r.height;
+    const data = audioBuffer.getChannelData(0);
+    const step = Math.ceil(data.length / w);
+
+    ctx.fillStyle = '#1a1a24';
+    ctx.fillRect(0, 0, w, h);
+
+    // Waveform
+    for (let i = 0; i < w; i++) {
+      let min = 1, max = -1;
+      for (let j = 0; j < step; j++) {
+        const s = data[i * step + j] || 0;
+        if (s < min) min = s;
+        if (s > max) max = s;
+      }
+      const inRange = i / w >= startFraction && i / w <= endFraction;
+      ctx.fillStyle = inRange ? '#34d399' : '#2c4a3e';
+      const top = ((1 - max) / 2) * h;
+      const bot = ((1 - min) / 2) * h;
+      ctx.fillRect(i, top, 1, Math.max(1, bot - top));
+    }
+
+    // Dimmed trim-out regions
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, startFraction * w, h);
+    ctx.fillRect(endFraction * w, 0, w * (1 - endFraction), h);
+
+    // Handle lines + tab
+    [[startFraction, 1], [endFraction, -1]].forEach(([frac, dir]) => {
+      const x = frac * w;
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(x, 0); ctx.lineTo(x + dir * 9, 0); ctx.lineTo(x, 12);
+      ctx.closePath(); ctx.fill();
+    });
+  }
+
+  canvas.addEventListener('pointerdown', e => {
+    const r = canvas.getBoundingClientRect();
+    const x = e.clientX - r.left;
+    const sx = startFraction * r.width, ex = endFraction * r.width;
+    if (Math.abs(x - sx) < HIT) dragging = 'start';
+    else if (Math.abs(x - ex) < HIT) dragging = 'end';
+    if (dragging) canvas.setPointerCapture(e.pointerId);
+  });
+
+  canvas.addEventListener('pointermove', e => {
+    if (!dragging) return;
+    const f = toFraction(e.clientX);
+    if (dragging === 'start') startFraction = Math.min(f, endFraction - 0.01);
+    else endFraction = Math.max(f, startFraction + 0.01);
+    drawWaveform();
+    updateTimeDisplay();
+  });
+
+  canvas.addEventListener('pointerup', () => { dragging = null; });
+
+  let testSource = null;
+  let testCtx = null;
+  testBtn.addEventListener('click', () => {
+    if (!audioBuffer) return;
+    if (testSource) {
+      try { testSource.stop(); } catch(_) {}
+      testSource = null;
+      if (testCtx && testCtx.state !== 'closed') testCtx.close();
+      testCtx = null;
+      testBtn.textContent = '▶ Test';
+      testBtn.style.color = '#8aabff';
+      testBtn.style.borderColor = '#2c2c3e';
+      return;
+    }
+
+    const startTime = startFraction * audioBuffer.duration;
+    const endTime = endFraction * audioBuffer.duration;
+    testCtx = new AudioContext();
+    testSource = testCtx.createBufferSource();
+    testSource.buffer = audioBuffer;
+    testSource.connect(testCtx.destination);
+    testSource.start(0, startTime, endTime - startTime);
+    testBtn.textContent = '◼ Stop';
+    testBtn.style.color = '#f87171';
+    testBtn.style.borderColor = 'rgba(248,113,113,0.3)';
+    testSource.onended = () => {
+      testSource = null;
+      testBtn.textContent = '▶ Test';
+      testBtn.style.color = '#8aabff';
+      testBtn.style.borderColor = '#2c2c3e';
+    };
+  });
+
+  applyBtn.addEventListener('click', async () => {
+    if (!audioBuffer) return;
+    applyBtn.textContent = 'Trimming…';
+    applyBtn.disabled = true;
+    try {
+      const startTime = startFraction * audioBuffer.duration;
+      const endTime = endFraction * audioBuffer.duration;
+      const wavBlob = await trimAudioBuffer(audioBuffer, startTime, endTime);
+      const newFilename = (currentAudioFilename || 'subtitle_audio').replace(/\.[^.]+$/, '') + '_trimmed.wav';
+      const b64 = await new Promise((res, rej) => {
+        const rd = new FileReader();
+        rd.onloadend = () => res(rd.result.split(',')[1]);
+        rd.onerror = rej;
+        rd.readAsDataURL(wavBlob);
+      });
+      const resp = await chrome.runtime.sendMessage({ action: 'ankiStoreMediaFile', filename: newFilename, data: b64 });
+      if (resp && resp.success) {
+        if (currentAudioBlobUrl) URL.revokeObjectURL(currentAudioBlobUrl);
+        currentAudioBlobUrl = URL.createObjectURL(wavBlob);
+        currentAudioFilename = newFilename;
+        audioTextarea.value = `[sound:${newFilename}]`;
+        panel.remove();
+      } else {
+        alert('Failed to store trimmed audio');
+        applyBtn.textContent = '✂ Apply Trim';
+        applyBtn.disabled = false;
+      }
+    } catch (err) {
+      console.error('Trim error:', err);
+      alert('Trim failed: ' + err.message);
+      applyBtn.textContent = '✂ Apply Trim';
+      applyBtn.disabled = false;
+    }
+  });
+
+  fetch(currentAudioBlobUrl)
+    .then(r => r.arrayBuffer())
+    .then(ab => new AudioContext().decodeAudioData(ab))
+    .then(buf => { audioBuffer = buf; drawWaveform(); updateTimeDisplay(); })
+    .catch(err => { timeDisplay.textContent = 'Failed to load audio: ' + err.message; });
+}
+
 // ── Image search helpers ────────────────────────────────────────────────────
 
 function isImageFilename(name) {
@@ -320,6 +576,42 @@ function isImageField(fieldName) {
   return IMAGE_FIELD_NAMES.some(n => fieldName.toLowerCase().includes(n));
 }
 
+function showImageLightbox(src) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;z-index:2147483647;cursor:zoom-out;';
+  const img = document.createElement('img');
+  img.src = src;
+  img.style.cssText = 'max-width:90vw;max-height:90vh;border-radius:6px;box-shadow:0 8px 40px rgba(0,0,0,0.6);';
+  img.addEventListener('click', e => e.stopPropagation());
+  overlay.appendChild(img);
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
+function buildImagePreview(thumbSrc, filename, onClear) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:6px;margin-bottom:4px;';
+  const thumb = document.createElement('img');
+  thumb.src = thumbSrc;
+  thumb.title = 'Click to enlarge';
+  thumb.style.cssText = 'height:48px;width:64px;object-fit:cover;border-radius:3px;flex-shrink:0;cursor:zoom-in;';
+  thumb.addEventListener('click', () => showImageLightbox(thumbSrc));
+  const label = document.createElement('span');
+  label.style.cssText = 'color:#34d399;font-size:11px;word-break:break-all;flex:1;';
+  label.textContent = `✓ ${filename}`;
+  const xBtn = document.createElement('button');
+  xBtn.textContent = '✕';
+  xBtn.title = 'Remove image';
+  xBtn.style.cssText = 'background:none;border:none;color:#8f8fa8;font-size:14px;cursor:pointer;padding:0 2px;flex-shrink:0;line-height:1;';
+  xBtn.addEventListener('mouseenter', () => { xBtn.style.color = '#f87171'; });
+  xBtn.addEventListener('mouseleave', () => { xBtn.style.color = '#8f8fa8'; });
+  xBtn.addEventListener('click', onClear);
+  row.appendChild(thumb);
+  row.appendChild(label);
+  row.appendChild(xBtn);
+  return row;
+}
+
 function createImagePickerField(field, fieldId) {
   const aiButtonStyle = `
     padding: 5px 9px;
@@ -364,7 +656,7 @@ function createImagePickerField(field, fieldId) {
 
   const searchBtn = document.createElement('button');
   searchBtn.textContent = 'Search';
-  searchBtn.style.cssText = aiButtonStyle + 'padding:7px 13px;font-size:12px;';
+  searchBtn.style.cssText = aiButtonStyle + 'padding:7px 13px;font-size:12px;width:76px;flex-shrink:0;';
 
   searchRow.appendChild(searchInput);
   searchRow.appendChild(searchBtn);
@@ -502,19 +794,14 @@ function createImagePickerField(field, fieldId) {
     try {
       const resp = await chrome.runtime.sendMessage({ action, prompt });
       if (resp.success) {
+        pendingGeneratedImage = { filename: resp.filename, imageBase64: resp.imageBase64, mimeType: resp.mimeType };
         hiddenTextarea.value = `<img src="${resp.filename}">`;
         preview.textContent = '';
-        const genDiv = document.createElement('div');
-        genDiv.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:6px;margin-bottom:4px;';
-        const genImg = document.createElement('img');
-        genImg.src = resp.dataUrl;
-        genImg.style.cssText = 'height:60px;width:80px;object-fit:cover;border-radius:3px;flex-shrink:0;';
-        const genSpan = document.createElement('span');
-        genSpan.style.cssText = 'color:#34d399;font-size:11px;word-break:break-all;';
-        genSpan.textContent = `✓ ${resp.filename}`;
-        genDiv.appendChild(genImg);
-        genDiv.appendChild(genSpan);
-        preview.appendChild(genDiv);
+        preview.appendChild(buildImagePreview(resp.dataUrl, resp.filename, () => {
+          pendingGeneratedImage = null;
+          hiddenTextarea.value = '';
+          preview.textContent = '';
+        }));
         generateStatus.textContent = '';
       } else {
         generateStatus.style.color = '#f87171';
@@ -565,6 +852,7 @@ function createImagePickerField(field, fieldId) {
           i.style.borderColor = 'transparent'; i.style.opacity = '1';
         });
         img.style.borderColor = '#5a7fff';
+        pendingGeneratedImage = null;
         hiddenTextarea.value = '';
         preview.innerHTML = '';
         statusLine.style.color = '#8f8fa8';
@@ -579,17 +867,11 @@ function createImagePickerField(field, fieldId) {
           if (resp.success) {
             hiddenTextarea.value = `<img src="${resp.filename}">`;
             preview.textContent = '';
-            const storeDiv = document.createElement('div');
-            storeDiv.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.25);border-radius:6px;margin-bottom:4px;';
-            const storeImg = document.createElement('img');
-            storeImg.src = item.thumb;
-            storeImg.style.cssText = 'height:40px;width:56px;object-fit:cover;border-radius:3px;flex-shrink:0;';
-            const storeSpan = document.createElement('span');
-            storeSpan.style.cssText = 'color:#34d399;font-size:11px;word-break:break-all;';
-            storeSpan.textContent = `✓ ${resp.filename}`;
-            storeDiv.appendChild(storeImg);
-            storeDiv.appendChild(storeSpan);
-            preview.appendChild(storeDiv);
+            preview.appendChild(buildImagePreview(item.thumb, resp.filename, () => {
+              hiddenTextarea.value = '';
+              preview.textContent = '';
+              grid.querySelectorAll('img').forEach(i => { i.style.borderColor = 'transparent'; i.style.opacity = '1'; });
+            }));
             statusLine.textContent = '';
           } else {
             statusLine.style.color = '#f87171';
@@ -772,23 +1054,25 @@ async function loadModelFields(getWordsCallback) {
           `;
 
           const buttonDiv = document.createElement('div');
-          buttonDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;';
+          buttonDiv.style.cssText = 'display:flex;flex-direction:column;gap:4px;width:76px;flex-shrink:0;';
 
-          const translateBtn = document.createElement('button');
-          translateBtn.className = 'ai-translate-btn';
-          translateBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
-          translateBtn.title = 'Translate sentence to English';
-          translateBtn.style.cssText = aiButtonStyle;
-          translateBtn.textContent = 'AI Translate';
-          buttonDiv.appendChild(translateBtn);
+          if (!isAudioField) {
+            const translateBtn = document.createElement('button');
+            translateBtn.className = 'ai-translate-btn';
+            translateBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
+            translateBtn.title = 'Translate sentence to English';
+            translateBtn.style.cssText = aiButtonStyle;
+            translateBtn.textContent = 'AI Translate';
+            buttonDiv.appendChild(translateBtn);
 
-          const defineBtn = document.createElement('button');
-          defineBtn.className = 'ai-define-btn';
-          defineBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
-          defineBtn.title = 'Define unknown word in context';
-          defineBtn.style.cssText = aiButtonStyle;
-          defineBtn.textContent = 'AI Define';
-          buttonDiv.appendChild(defineBtn);
+            const defineBtn = document.createElement('button');
+            defineBtn.className = 'ai-define-btn';
+            defineBtn.setAttribute('data-field-id', `anki-field-${fieldId}`);
+            defineBtn.title = 'Define unknown word in context';
+            defineBtn.style.cssText = aiButtonStyle;
+            defineBtn.textContent = 'AI Define';
+            buttonDiv.appendChild(defineBtn);
+          }
 
           if (isAudioField) {
             const audioBtn = document.createElement('button');
@@ -826,6 +1110,62 @@ async function loadModelFields(getWordsCallback) {
 
       if (response.fields.length > 0) {
         fillSentenceField();
+        // Pre-fill Audio field textarea if recorded audio exists, and add play button
+        if (currentAudioFilename) {
+          const allFieldTextareas = Array.from(ankiModal.querySelectorAll('textarea[data-field-name]'));
+          const audioTextarea = allFieldTextareas.find(t => t.dataset.fieldName === audioFieldName);
+          if (audioTextarea && !audioTextarea.value.includes('[sound:')) {
+            audioTextarea.value = `[sound:${currentAudioFilename}]`;
+            if (currentAudioBlobUrl) {
+              const buttonDiv = audioTextarea.parentNode?.lastElementChild;
+              if (buttonDiv && buttonDiv !== audioTextarea && !buttonDiv.querySelector('.ai-audio-play-btn')) {
+                const playBtn = document.createElement('button');
+                playBtn.className = 'ai-audio-play-btn';
+                playBtn.style.cssText = `
+                  padding: 5px 9px;
+                  background: rgba(52,211,153,0.12);
+                  color: #34d399;
+                  border: 1px solid rgba(52,211,153,0.28);
+                  border-radius: 5px;
+                  cursor: pointer;
+                  font-size: 11px;
+                  font-weight: 500;
+                  white-space: nowrap;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  transition: all 0.15s ease;
+                `;
+                playBtn.textContent = '▶ Play';
+                playBtn.addEventListener('click', () => {
+                  if (currentAudioBlobUrl) new Audio(currentAudioBlobUrl).play();
+                });
+                buttonDiv.insertBefore(playBtn, buttonDiv.firstChild);
+
+                const trimBtn = document.createElement('button');
+                trimBtn.className = 'ai-audio-trim-btn';
+                trimBtn.style.cssText = `
+                  padding: 5px 9px;
+                  background: #21212e;
+                  color: #8f8fa8;
+                  border: 1px solid #2c2c3e;
+                  border-radius: 5px;
+                  cursor: pointer;
+                  font-size: 11px;
+                  font-weight: 500;
+                  white-space: nowrap;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  transition: all 0.15s ease;
+                `;
+                trimBtn.textContent = '✂ Trim';
+                trimBtn.addEventListener('click', () => showAudioTrimPanel(audioTextarea));
+                buttonDiv.insertBefore(trimBtn, playBtn.nextSibling);
+              }
+            }
+          }
+        }
       }
 
       attachAIButtonListeners(getWordsCallback);
@@ -948,6 +1288,21 @@ async function createAnkiCard() {
     createButton.disabled = true;
     createButton.textContent = 'Creating...';
 
+    if (pendingGeneratedImage) {
+      const storeResp = await chrome.runtime.sendMessage({
+        action: 'storeGeneratedImage',
+        filename: pendingGeneratedImage.filename,
+        imageBase64: pendingGeneratedImage.imageBase64
+      });
+      if (!storeResp.success) {
+        showModalError('Failed to store generated image: ' + (storeResp.error || 'Unknown error'));
+        createButton.disabled = false;
+        createButton.textContent = 'Create Card';
+        return;
+      }
+      pendingGeneratedImage = null;
+    }
+
     const response = await chrome.runtime.sendMessage({
       action: 'createNote',
       deckName: deckName,
@@ -1016,9 +1371,18 @@ function closeAnkiModal() {
   }
   currentSentence = null;
   currentAudioFilename = null;
+  pendingGeneratedImage = null;
+  const contextEl = ankiModal && ankiModal.querySelector('#anki-ai-context');
+  if (contextEl) { contextEl.value = ''; contextEl.style.display = 'none'; }
+  const arrowEl = ankiModal && ankiModal.querySelector('#anki-context-arrow');
+  if (arrowEl) arrowEl.textContent = '▸';
   if (currentAudioBlobUrl) {
     URL.revokeObjectURL(currentAudioBlobUrl);
     currentAudioBlobUrl = null;
+  }
+  if (onModalCloseCallback) {
+    try { onModalCloseCallback(); } catch (_) {}
+    onModalCloseCallback = null;
   }
 }
 
@@ -1166,6 +1530,28 @@ function createAnkiModal(getWordsCallback) {
           </select>
         </div>
 
+        <div id="anki-context-section" style="margin-bottom:14px;">
+          <button id="anki-context-toggle" style="
+            background:none;border:none;color:#8f8fa8;font-size:12px;cursor:pointer;
+            padding:0;display:flex;align-items:center;gap:5px;letter-spacing:0.1px;
+          "><span id="anki-context-arrow" style="font-size:10px;">▸</span> Add context for AI (optional)</button>
+          <textarea id="anki-ai-context" placeholder="e.g. A customer speaking to a waiter who offered a recommendation" style="
+            display:none;
+            width:100%;box-sizing:border-box;
+            margin-top:8px;
+            min-height:52px;
+            padding:8px 11px;
+            border:1px solid #2c2c3e;
+            border-radius:6px;
+            font-size:12.5px;
+            font-family:inherit;
+            resize:vertical;
+            color:#ededf5;
+            background:#1a1a24;
+            outline:none;
+          "></textarea>
+        </div>
+
         <div id="anki-fields-container"></div>
 
         <div id="anki-error-message" style="
@@ -1231,6 +1617,16 @@ function createAnkiModal(getWordsCallback) {
   modal.querySelector('#anki-model-select').addEventListener('change', () => loadModelFields(getWordsCallback));
   modal.querySelector('#anki-sentence-field-select').addEventListener('change', fillSentenceField);
 
+  const contextToggle = modal.querySelector('#anki-context-toggle');
+  const contextArrow = modal.querySelector('#anki-context-arrow');
+  const contextTextarea = modal.querySelector('#anki-ai-context');
+  contextToggle.addEventListener('click', () => {
+    const open = contextTextarea.style.display === 'none';
+    contextTextarea.style.display = open ? 'block' : 'none';
+    contextArrow.textContent = open ? '▾' : '▸';
+    if (open) contextTextarea.focus();
+  });
+
   modal.addEventListener('click', (e) => {
     if (e.target === modal) {
       closeAnkiModal();
@@ -1246,9 +1642,14 @@ function createAnkiModal(getWordsCallback) {
  * @param {string} sentence - Hebrew sentence to create card from
  * @param {Function} getWordsCallback - Callback to get word lists
  */
-async function openAnkiModal(sentence, getWordsCallback, audioFilename = null) {
+async function openAnkiModal(sentence, getWordsCallback, audioFilename = null, audioBlobUrl = null, onClose = null) {
   currentSentence = sentence;
   currentAudioFilename = audioFilename;
+  onModalCloseCallback = onClose;
+  if (audioBlobUrl) {
+    if (currentAudioBlobUrl) URL.revokeObjectURL(currentAudioBlobUrl);
+    currentAudioBlobUrl = audioBlobUrl;
+  }
   const modal = createAnkiModal(getWordsCallback);
 
   modal.querySelector('#anki-sentence-display').textContent = sentence;

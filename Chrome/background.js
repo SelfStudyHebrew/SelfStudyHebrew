@@ -1,6 +1,7 @@
 const ANKI_CONNECT_URL = 'http://localhost:8765';
 const DEFAULT_SETTINGS = {
-  sentenceColor: '#5a7fff',   // Sentences with 1 unknown word (blue)
+  sentenceColor: '#5a7fff',       // Sentences with 1 unknown word (blue)
+  potentiallyI1Color: '#9b6bff', // Sentences with 1 potentially-known word (purple)
   fieldName: 'Hebrew',
   deckFilter: '',
   highlightEnabled: true,
@@ -20,27 +21,24 @@ const DEFAULT_SETTINGS = {
   cloudflareAccountId: '',  // Cloudflare Account ID for free AI image generation
   cloudflareApiToken: '',  // Cloudflare API Token (Workers AI:Run permission)
   cloudflareImageModel: '@cf/black-forest-labs/flux-1-schnell',  // Cloudflare Workers AI image model
-  autoExportEnabled: true,  // Auto-export custom definitions on change
-  autoExportFilename: 'selfstudyhebrew-custom-definitions.json',  // Filename for auto-export
+
   maxWordsForI1: 3000,  // Max known words to send for i+1 generation (top frequent + random sampling)
   sentenceGenerationPrompt: `TARGET WORD (unknown to student): {{TARGET_WORD}}
 
-Generate {{COUNT}} natural Hebrew sentences following these rules:
+Generate {{COUNT}} Hebrew sentences for a language learner. Goal: each sentence should make the meaning of {{TARGET_WORD}} as inferrable as possible from the surrounding context.
 
-1. Each sentence MUST contain the exact target word "{{TARGET_WORD}}" with no modifications (No added prefixes/prepositions)
-2. All other words MUST come from the known words list only
-3. You MAY add prefixes/prepositions to known words when grammatically necessary, but not the target word as this should not be modified. For example, if the target word is בר then you should NOT change it to לבר or הבר or ובר
-4. Sentences must be natural, grammatically correct Hebrew that native speakers would use
-5. Vary sentence structure, context, and length
-6. Keep sentences simple but meaningful
+Rules:
+1. {{TARGET_WORD}} must appear exactly as written — no prefixes, suffixes, or vowel changes
+2. All other words must come from the known words list
+3. Known words MAY take prefixes/prepositions (ל, ב, ו, ש, מ, ה) when grammatically natural
+4. Write in modern spoken Israeli Hebrew — conversational register, not formal or literary
+5. Do not include nikud (vowel marks)
+6. Vary the contexts: different speakers, situations, sentence structures
+7. Prefer sentences where the meaning of {{TARGET_WORD}} is clear from context
 
-CRITICAL CONSTRAINTS:
-- Do NOT use any words outside the known words list (except the target word)
-- Do NOT modify the target word itself (no prefixes/suffixes unless the word already has them)
-- Do NOT add explanations, translations, or numbering
-
-OUTPUT FORMAT: Return ONLY {{COUNT}} Hebrew sentences, one per line, nothing else.`,
-  aiDefinePrompt: ''  // Empty = use DEFAULT_DEFINE_PROMPT (defined later in this file)
+OUTPUT: Return exactly {{COUNT}} Hebrew sentences, one per line. Nothing else.`,
+  aiDefinePrompt: '',  // Empty = use DEFAULT_DEFINE_PROMPT (defined later in this file)
+  aiTranslatePrompt: ''  // Empty = use DEFAULT_TRANSLATE_PROMPT (defined later in this file)
 };
 
 const DB_NAME = 'HebrewDictionary';
@@ -336,7 +334,7 @@ async function setupAnkiForSelfStudyHebrew() {
 
     const SSH_CSS = `
       .card {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-family: Arial, sans-serif;
         font-size: 18px;
         text-align: center;
         color: #ededf5;
@@ -396,7 +394,7 @@ async function setupAnkiForSelfStudyHebrew() {
       }
 
       .image-wrap {
-        margin-top: 20px;
+        margin-bottom: 20px;
         display: flex;
         justify-content: center;
       }
@@ -421,6 +419,10 @@ async function setupAnkiForSelfStudyHebrew() {
 </div>`;
 
     const SSH_BACK = `<div class="card-inner">
+  {{#Image}}
+  <div class="image-wrap">{{Image}}</div>
+  {{/Image}}
+
   <div class="hebrew">{{Hebrew}}</div>
 
   <hr id=answer>
@@ -432,10 +434,6 @@ async function setupAnkiForSelfStudyHebrew() {
   {{/Notes}}
 
   <div class="audio-wrap">{{Audio}}</div>
-
-  {{#Image}}
-  <div class="image-wrap">{{Image}}</div>
-  {{/Image}}
 </div>`;
 
     const existingModels = await ankiConnectInvoke('modelNames');
@@ -472,9 +470,31 @@ async function setupAnkiForSelfStudyHebrew() {
       console.log('✓ Updated SelfStudyHebrew note type');
     }
 
+    // Create SSH Custom Definitions deck and note type
+    if (!existingDecks.includes(CUSTOM_DEF_DECK)) {
+      await ankiConnectInvoke('createDeck', { deck: CUSTOM_DEF_DECK });
+      console.log('✓ Created SSH Custom Definitions deck');
+    }
+
+    const existingModelsAfter = await ankiConnectInvoke('modelNames');
+    if (!existingModelsAfter.includes(CUSTOM_DEF_MODEL)) {
+      await ankiConnectInvoke('createModel', {
+        modelName: CUSTOM_DEF_MODEL,
+        inOrderFields: ['Word', 'Definition'],
+        css: '.card { font-family: arial; font-size: 20px; text-align: center; color: #333; }',
+        isCloze: false,
+        cardTemplates: [{
+          Name: 'Custom Definition',
+          Front: '{{Word}}',
+          Back: '{{FrontSide}}<hr>{{Definition}}'
+        }]
+      });
+      console.log('✓ Created SSH-CustomDefinition note type');
+    }
+
     return {
       success: true,
-      message: 'Setup completed! Created: Already Known deck, Ignored deck, Sentence Mining deck with SelfStudyHebrew preset (5 new/day, 9999 reviews/day), and SelfStudyHebrew note type.\n\nNote: Please manually enable FSRS in Anki (Sentence Mining → Options → Enable FSRS toggle, set retention to 85%).'
+      message: 'Setup completed! Created: Already Known deck, Ignored deck, Sentence Mining deck with SelfStudyHebrew preset (5 new/day, 9999 reviews/day), SSH Custom Definitions deck, and SelfStudyHebrew note type.\n\nNote: Please manually enable FSRS in Anki (Sentence Mining → Options → Enable FSRS toggle, set retention to 85%).'
     };
   } catch (error) {
     console.error('Error setting up Anki:', error);
@@ -781,55 +801,67 @@ async function generateElevenLabsAudio(text, apiKey, voiceId, model) {
   return { filename, audioData: base64Audio };
 }
 
-async function translateSentence(sentence, apiKey, model) {
-  const prompt = `Translate the following Hebrew sentence to English. Provide only the English translation, nothing else:\n\n${sentence}`;
-  const { text, usage } = await callClaudeAPI(apiKey, prompt, { model });
-  return { text, cost: calculateClaudeCost(usage, model) };
+const DEFAULT_TRANSLATE_SYSTEM = 'You are a Hebrew-to-English translator. Output only the English translation — no notes, no explanations, no punctuation changes beyond what the sentence requires.';
+const DEFAULT_TRANSLATE_PROMPT = `Translate this Hebrew sentence into natural English.{{CONTEXT}}\n\nHebrew: {{SENTENCE}}\nEnglish:`;
+
+async function translateSentence(sentence, apiKey, model, context, customPrompt) {
+  const contextLine = context ? `\nContext: ${context}` : '';
+  const system = DEFAULT_TRANSLATE_SYSTEM;
+  const template = customPrompt || DEFAULT_TRANSLATE_PROMPT;
+  const prompt = template
+    .replace(/\{\{SENTENCE\}\}/g, sentence)
+    .replace(/\{\{CONTEXT\}\}/g, contextLine);
+  const { text, usage } = await callClaudeAPI(apiKey, prompt, { system, model });
+  return { text: text.trim(), cost: calculateClaudeCost(usage, model) };
 }
 
 const DEFAULT_DEFINE_PROMPT = `Hebrew sentence: {{SENTENCE}}
 
 Define the word "{{WORD}}" as it appears in that sentence.
 
+If the word includes a bound prefix (ש, ב, ל, ו, מ, כ, ה), define the base word using the standard format below. Under MEANING, note the prefix and its contribution briefly, e.g. "people / men (here: שֶׁ + אֲנָשִׁים = 'that people')".
+
 Use exactly this HTML format — bold each label, each entry on its own line with no blank lines:
 
 <b>TYPE:</b> [part of speech — Verb / Noun / Adjective / Adverb / Preposition / Conjunction / Pronoun / Particle / etc.]
-<b>ROOT:</b> [Hebrew root letters separated by dashes, e.g. פ - ת - ח]
-<b>MEANING:</b> [core meaning(s), including all persons/genders/numbers the form covers where relevant, e.g. "is opened / has been opened"]
+<b>ROOT:</b> [Hebrew root letters separated by dashes, e.g. פ - ת - ח, or N/A for particles and function words]
+<b>MEANING:</b> [list the main meanings of this word form; include gender/number/person where relevant]
+<b>CONTEXT:</b> [what the word means specifically in this sentence — literal, idiomatic, emotional, etc.]
 
-If the word is a verb, add these two lines immediately after MEANING:
-<b>TENSE:</b> [Present / Past / Future / Imperative, plus person/gender/number where applicable]
-<b>INFINITIVE:</b> [infinitive form in Hebrew followed by its English meaning in parentheses, e.g. להיפתח (To Be Opened)]
+If the word is a Verb, add these three lines immediately after MEANING (before CONTEXT):
+<b>TENSE:</b> [Present / Past / Future / Imperative, plus person/gender/number]
+<b>BINYAN:</b> [פָּעַל / פִּיעֵל / פּוּעַל / הִפְעִיל / הֻפְעַל / הִתְפַּעֵל / נִפְעַל]
+<b>INFINITIVE:</b> [infinitive form in Hebrew followed by English meaning in parentheses, e.g. לִפְתֹּחַ (to open)]
 
-Then always end with:
-<b>CONTEXT:</b> [what the word means specifically in this sentence — emotional, literal, idiomatic, etc.]
+If the word is a Noun or Adjective, add this line immediately after MEANING (before CONTEXT):
+<b>LEMMA:</b> [base dictionary form — masculine singular for adjectives, absolute singular for nouns — with gender, e.g. בַּיִת (m)]
 
-If context alone cannot disambiguate between multiple distinct meanings, list each possibility under MEANING before giving the best-guess CONTEXT.
 Output only the formatted definition — no preamble, no explanation.`;
 
-async function defineWord(sentence, unknownWord, apiKey, model, customPrompt) {
+async function defineWord(sentence, unknownWord, apiKey, model, customPrompt, context) {
   const template = customPrompt || DEFAULT_DEFINE_PROMPT;
-  const prompt = template
+  const contextLine = context ? `\nContext: ${context}` : '';
+  const prompt = (template
     .replace(/\{\{SENTENCE\}\}/g, sentence)
-    .replace(/\{\{WORD\}\}/g, unknownWord);
+    .replace(/\{\{WORD\}\}/g, unknownWord)) + contextLine;
   const { text, usage } = await callClaudeAPI(apiKey, prompt, { model });
   return { text, cost: calculateClaudeCost(usage, model) };
 }
 
-async function defineWords(sentence, unknownWords, apiKey, model, customPrompt) {
+async function defineWords(sentence, unknownWords, apiKey, model, customPrompt, context) {
   if (!unknownWords || unknownWords.length === 0) {
     return { text: 'No unknown words to define.', cost: 0 };
   }
 
   if (unknownWords.length === 1) {
-    return await defineWord(sentence, unknownWords[0], apiKey, model, customPrompt);
+    return await defineWord(sentence, unknownWords[0], apiKey, model, customPrompt, context);
   }
 
   // Multiple words: run each through the single-word prompt and concatenate
   let combinedText = '';
   let totalCost = 0;
   for (const word of unknownWords) {
-    const { text, cost } = await defineWord(sentence, word, apiKey, model, customPrompt);
+    const { text, cost } = await defineWord(sentence, word, apiKey, model, customPrompt, context);
     combinedText += (combinedText ? '\n\n' : '') + `<b>${word}</b>\n${text}`;
     totalCost += cost;
   }
@@ -943,68 +975,67 @@ async function lookupWord(word) {
   }
 }
 
-async function autoExportCustomDefinitions() {
-  try {
-    const settingsData = await chrome.storage.local.get('settings');
-    const settings = settingsData.settings || {};
+const CUSTOM_DEF_DECK = 'SSH Custom Definitions';
+const CUSTOM_DEF_MODEL = 'SSH-CustomDefinition';
 
-    if (!settings.autoExportEnabled) {
-      return;
+// Fetch custom definitions from Anki and rebuild the local cache
+async function fetchCustomDefinitions() {
+  try {
+    console.log(`[SSH] fetchCustomDefinitions: querying deck "${CUSTOM_DEF_DECK}"`);
+    const noteIds = await ankiConnectInvoke('findNotes', { query: `deck:"${CUSTOM_DEF_DECK}"` });
+    console.log(`[SSH] Custom definitions query found ${noteIds?.length ?? 0} note(s) in deck "${CUSTOM_DEF_DECK}"`);
+    if (!noteIds || noteIds.length === 0) return;
+
+    const notesInfo = await ankiConnectInvoke('notesInfo', { notes: noteIds });
+    const ankiDefs = {};
+    for (const note of notesInfo) {
+      const word = (note.fields?.Word?.value || '').replace(/[֑-ׇ]/g, '');
+      const def = note.fields?.Definition?.value || '';
+      if (!word || !def) continue;
+      if (!ankiDefs[word]) ankiDefs[word] = [];
+      if (!ankiDefs[word].includes(def)) ankiDefs[word].push(def);
     }
 
-    const data = await chrome.storage.local.get('customDefinitions');
-    const customDefinitions = data.customDefinitions || {};
-
-    const dataStr = JSON.stringify(customDefinitions, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const filename = settings.autoExportFilename || 'selfstudyhebrew-custom-definitions.json';
-
-    await chrome.downloads.download({
-      url: url,
-      filename: filename,
-      conflictAction: 'overwrite',
-      saveAs: false // Don't prompt user, use Downloads folder
-    });
-
-    console.log('[Auto-export] Custom definitions exported to:', filename);
-
-    // Clean up blob URL
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Merge with any existing local-only defs (local takes precedence for order)
+    const existing = await chrome.storage.local.get('customDefinitions');
+    const local = existing.customDefinitions || {};
+    const merged = { ...ankiDefs };
+    for (const [word, defs] of Object.entries(local)) {
+      if (!merged[word]) merged[word] = [];
+      for (const def of defs) {
+        if (!merged[word].includes(def)) merged[word].push(def);
+      }
+    }
+    await chrome.storage.local.set({ customDefinitions: merged });
+    console.log(`[SSH] Loaded ${noteIds.length} custom definition(s) from Anki`);
   } catch (error) {
-    console.error('[Auto-export] Error exporting custom definitions:', error);
+    console.log('[SSH] Could not fetch custom definitions from Anki (AnkiConnect may not be running):', error.message);
   }
 }
 
-// Add custom definition
+// Add custom definition \u2014 saves to local cache and to Anki
 async function addCustomDefinition(word, definition) {
   const normalizedWord = word.replace(/[\u0591-\u05C7]/g, '');
 
-  return new Promise((resolve, reject) => {
-    chrome.storage.local.get('customDefinitions', (data) => {
-      const customs = data.customDefinitions || {};
+  const data = await chrome.storage.local.get('customDefinitions');
+  const customs = data.customDefinitions || {};
+  if (!customs[normalizedWord]) customs[normalizedWord] = [];
 
-      if (!customs[normalizedWord]) {
-        customs[normalizedWord] = [];
+  if (!customs[normalizedWord].includes(definition)) {
+    customs[normalizedWord].push(definition);
+    await chrome.storage.local.set({ customDefinitions: customs });
+
+    // Fire-and-forget Anki save \u2014 don't block the response on AnkiConnect
+    ankiConnectInvoke('addNote', {
+      note: {
+        deckName: CUSTOM_DEF_DECK,
+        modelName: CUSTOM_DEF_MODEL,
+        fields: { Word: normalizedWord, Definition: definition },
+        tags: ['ssh-custom-definition'],
+        options: { allowDuplicate: true, duplicateScope: 'deck' }
       }
-
-      // Add definition if not already present
-      if (!customs[normalizedWord].includes(definition)) {
-        customs[normalizedWord].push(definition);
-      }
-
-      chrome.storage.local.set({ customDefinitions: customs }, () => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError);
-        } else {
-          // Trigger auto-export after successfully adding definition
-          autoExportCustomDefinitions();
-          resolve();
-        }
-      });
-    });
-  });
+    }).catch(error => console.log('[SSH] Could not save custom definition to Anki:', error.message));
+  }
 }
 
 // Clear dictionary database
@@ -1168,7 +1199,7 @@ const MESSAGE_HANDLERS = {
   },
 
   refreshWords: (request, sender, sendResponse) => {
-    fetchHebrewWords()
+    Promise.all([fetchHebrewWords(), fetchCustomDefinitions()])
       .then(() => sendResponse({ success: true }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -1387,7 +1418,8 @@ const MESSAGE_HANDLERS = {
           throw new Error('Claude API key not set. Please add it in the settings.');
         }
         const model = data.settings?.claudeModel || DEFAULT_SETTINGS.claudeModel;
-        return translateSentence(request.sentence, apiKey, model);
+        const customPrompt = data.settings?.aiTranslatePrompt || '';
+        return translateSentence(request.sentence, apiKey, model, request.context || '', customPrompt);
       })
       .then(async ({ text, cost }) => {
         await accumulateSpend(cost);
@@ -1425,7 +1457,7 @@ const MESSAGE_HANDLERS = {
         }
         const model = data.settings?.claudeModel || DEFAULT_SETTINGS.claudeModel;
         const customPrompt = data.settings?.aiDefinePrompt || null;
-        return defineWords(request.sentence, request.words, apiKey, model, customPrompt);
+        return defineWords(request.sentence, request.words, apiKey, model, customPrompt, request.context || '');
       })
       .then(async ({ text, cost }) => {
         await accumulateSpend(cost);
@@ -1780,11 +1812,11 @@ const MESSAGE_HANDLERS = {
         const ext = mimeType?.includes('jpeg') ? 'jpg' : mimeType?.includes('webp') ? 'webp' : 'png';
         const filename = `ssh_gemini_${Date.now()}.${ext}`;
 
-        await ankiConnectInvoke('storeMediaFile', { filename, data: imageBase64 });
-
         sendResponse({
           success: true,
           filename,
+          imageBase64,
+          mimeType,
           dataUrl: `data:${mimeType};base64,${imageBase64}`
         });
       } catch (error) {
@@ -1834,8 +1866,19 @@ const MESSAGE_HANDLERS = {
         if (!imageBase64) throw new Error('No image in Cloudflare response');
         const ext = mimeType.includes('jpeg') ? 'jpg' : mimeType.includes('webp') ? 'webp' : 'png';
         const filename = `ssh_cf_${Date.now()}.${ext}`;
-        await ankiConnectInvoke('storeMediaFile', { filename, data: imageBase64 });
-        sendResponse({ success: true, filename, dataUrl: `data:${mimeType};base64,${imageBase64}` });
+        sendResponse({ success: true, filename, imageBase64, mimeType, dataUrl: `data:${mimeType};base64,${imageBase64}` });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  },
+
+  storeGeneratedImage: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        await ankiConnectInvoke('storeMediaFile', { filename: request.filename, data: request.imageBase64 });
+        sendResponse({ success: true, filename: request.filename });
       } catch (error) {
         sendResponse({ success: false, error: error.message });
       }
@@ -1860,7 +1903,7 @@ chrome.runtime.onStartup.addListener(async () => {
 
   if (!data.lastUpdated || (Date.now() - data.lastUpdated) > oneHour) {
     try {
-      await fetchHebrewWords();
+      await Promise.all([fetchHebrewWords(), fetchCustomDefinitions()]);
     } catch (error) {
       console.log('Could not auto-fetch words on startup:', error.message);
     }

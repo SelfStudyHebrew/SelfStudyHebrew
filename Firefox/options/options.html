@@ -59,6 +59,22 @@
       </div>
 
       <div class="setting-item">
+        <label for="elevenlabs-voice-id">ElevenLabs Voice ID</label>
+        <input type="text" id="elevenlabs-voice-id" value="Jrq4GqCKqYpigdQsZRkP" placeholder="Jrq4GqCKqYpigdQsZRkP">
+        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+          <button type="button" class="voice-preset-btn" data-voice-id="Jrq4GqCKqYpigdQsZRkP" style="font-size:12px;padding:3px 10px;cursor:pointer;">Anatole (Masc)</button>
+          <button type="button" class="voice-preset-btn" data-voice-id="MpbYQvoTmXjHkaxtLiSh" style="font-size:12px;padding:3px 10px;cursor:pointer;">Anet (Fem)</button>
+        </div>
+        <p class="description">Voice ID to use for TTS. Click a preset above or find more IDs at <a href="https://elevenlabs.io/voice-library" target="_blank">elevenlabs.io/voice-library</a></p>
+      </div>
+
+      <div class="setting-item">
+        <label for="elevenlabs-model">ElevenLabs Model</label>
+        <input type="text" id="elevenlabs-model" value="eleven_v3" placeholder="eleven_v3">
+        <p class="description">ElevenLabs TTS model ID. See available models at <a href="https://elevenlabs.io/docs/models" target="_blank">elevenlabs.io/docs/models</a>. Note: Hebrew is only supported in <strong>eleven_v3</strong>.</p>
+      </div>
+
+      <div class="setting-item">
         <label for="gemini-api-key">Gemini API Key (Image Generation — Paid)</label>
         <input type="password" id="gemini-api-key" value="" placeholder="AIza...">
         <p class="description">Google Gemini API key for AI image generation. Note: image generation has no free tier — billing must be enabled at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com</a>. ~$0.05/image.</p>
@@ -83,22 +99,6 @@
       </div>
 
       <div class="setting-item">
-        <label for="elevenlabs-voice-id">ElevenLabs Voice ID</label>
-        <input type="text" id="elevenlabs-voice-id" value="Jrq4GqCKqYpigdQsZRkP" placeholder="Jrq4GqCKqYpigdQsZRkP">
-        <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
-          <button type="button" class="voice-preset-btn" data-voice-id="Jrq4GqCKqYpigdQsZRkP" style="font-size:12px;padding:3px 10px;cursor:pointer;">Anatole (Masc)</button>
-          <button type="button" class="voice-preset-btn" data-voice-id="MpbYQvoTmXjHkaxtLiSh" style="font-size:12px;padding:3px 10px;cursor:pointer;">Anet (Fem)</button>
-        </div>
-        <p class="description">Voice ID to use for TTS. Click a preset above or find more IDs at <a href="https://elevenlabs.io/voice-library" target="_blank">elevenlabs.io/voice-library</a></p>
-      </div>
-
-      <div class="setting-item">
-        <label for="elevenlabs-model">ElevenLabs Model</label>
-        <input type="text" id="elevenlabs-model" value="eleven_v3" placeholder="eleven_v3">
-        <p class="description">ElevenLabs TTS model ID. See available models at <a href="https://elevenlabs.io/docs/models" target="_blank">elevenlabs.io/docs/models</a>. Note: Hebrew is only supported in <strong>eleven_v3</strong>.</p>
-      </div>
-
-      <div class="setting-item">
         <label for="max-words-i1">Max Words for i+1 Generation</label>
         <input type="number" id="max-words-i1" value="3000" min="500" max="10000" step="500">
         <p class="description">Total known words to send for i+1 sentence generation, split 50/50: half from most frequent words, half random sample from remaining words. Lower = cheaper API costs, higher = more sentence variety. (Default: 3000 = 1,500 frequent + 1,500 random)</p>
@@ -116,6 +116,13 @@
         <p class="description">The prompt sent to Claude when defining a word. Use <code>{{SENTENCE}}</code> and <code>{{WORD}}</code> as placeholders — they are substituted at runtime.</p>
         <textarea id="ai-define-prompt" rows="18" style="width:100%; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
         <button type="button" id="reset-define-prompt-btn" style="margin-top: 8px;">Reset to Default</button>
+      </div>
+
+      <div class="setting-item">
+        <label for="ai-translate-prompt">AI Translate Prompt</label>
+        <p class="description">The prompt sent to Claude when translating a sentence. Use <code>{{SENTENCE}}</code> and <code>{{CONTEXT}}</code> as placeholders. The system message (output translation only) is always applied.</p>
+        <textarea id="ai-translate-prompt" rows="6" style="width:100%; font-family: monospace; font-size: 13px; resize: vertical;"></textarea>
+        <button type="button" id="reset-translate-prompt-btn" style="margin-top: 8px;">Reset to Default</button>
       </div>
     </div>
 
@@ -157,10 +164,21 @@
       <div class="setting-item">
         <label for="sentence-color">i+1 Sentence Background Color</label>
         <div class="input-group">
-          <input type="color" id="sentence-color" value="#add8e6">
-          <input type="text" id="sentence-color-text" value="#add8e6" maxlength="7">
+          <input type="color" id="sentence-color" value="#5a7fff">
+          <input type="text" id="sentence-color-text" value="#5a7fff" maxlength="7">
+          <button type="button" id="reset-sentence-color-btn" style="font-size:12px;padding:4px 10px;margin-left:6px;">Reset</button>
         </div>
         <p class="description">Background color for sentences with exactly 1 unknown Hebrew word</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="potentially-i1-color">Potentially i+1 Sentence Background Color</label>
+        <div class="input-group">
+          <input type="color" id="potentially-i1-color" value="#9b6bff">
+          <input type="text" id="potentially-i1-color-text" value="#9b6bff" maxlength="7">
+          <button type="button" id="reset-potentially-i1-color-btn" style="font-size:12px;padding:4px 10px;margin-left:6px;">Reset</button>
+        </div>
+        <p class="description">Background color for sentences with 1 potentially-known word (prefix detected) and 0–1 unknown words</p>
       </div>
 
       <div class="setting-item">
@@ -245,7 +263,9 @@
           <li><strong>Already Known</strong> deck - for marking words you already know</li>
           <li><strong>Ignored</strong> deck - for words to exclude from highlighting and i+1 detection</li>
           <li><strong>Sentence Mining</strong> deck - for storing sentences from subtitles</li>
+          <li><strong>SSH Custom Definitions</strong> deck - for storing your custom word definitions</li>
           <li><strong>SelfStudyHebrew</strong> note type - with fields: Hebrew, English, Notes, Audio, Image</li>
+          <li><strong>SSH-CustomDefinition</strong> note type - with fields: Word, Definition</li>
         </ul>
         <p style="margin: 5px 0 0 0; color: #888; font-size: 13px;">If they already exist, they won't be modified.</p>
       </div>
@@ -269,35 +289,6 @@
         <button id="clear-dictionary-btn" class="btn btn-danger">
           Clear Dictionary Cache
         </button>
-      </div>
-    </div>
-
-    <div class="settings-section">
-      <h2>Custom Definitions Backup</h2>
-      <p class="description">Export your custom definitions to save them, or import previously exported definitions. This allows you to keep your custom definitions even if you remove the extension.</p>
-
-      <div class="setting-item">
-        <label for="auto-export-enabled">
-          <input type="checkbox" id="auto-export-enabled">
-          Auto-export on every change
-        </label>
-        <p class="description">Automatically export custom definitions to your Downloads folder whenever you add a new one</p>
-      </div>
-
-      <div class="setting-item">
-        <label for="auto-export-filename">Auto-export filename</label>
-        <input type="text" id="auto-export-filename" value="selfstudyhebrew-custom-definitions.json" placeholder="selfstudyhebrew-custom-definitions.json">
-        <p class="description">Filename for auto-exported custom definitions (saved to Downloads folder). Will overwrite previous exports.</p>
-      </div>
-
-      <div class="actions">
-        <button id="export-definitions-btn" class="btn btn-secondary">
-          Export Custom Definitions
-        </button>
-        <button id="import-definitions-btn" class="btn btn-secondary">
-          Import Custom Definitions
-        </button>
-        <input type="file" id="import-definitions-file" accept=".json" style="display: none;">
       </div>
     </div>
 

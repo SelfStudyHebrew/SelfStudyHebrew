@@ -142,7 +142,9 @@ function createDictionaryPopup() {
     }
   });
 
-  popup.addEventListener('mouseleave', () => {
+  popup.addEventListener('mouseleave', (e) => {
+    // Keep popup open if Shift is still held
+    if (e.shiftKey) return;
     // Delay hiding to allow user to move mouse back
     wordHideTimeout = setTimeout(() => {
       hideDictionaryPopup();
@@ -808,15 +810,27 @@ async function showDictionaryPopup(word, x, y, refreshWordsCallback) {
           definition: definition
         });
 
-        if (addResponse.success) {
-          // Refresh the popup
-          showDictionaryPopup(word, x, y, refreshWordsCallback);
+        if (addResponse?.success) {
+          addBtn.textContent = '✓ Added';
+          setTimeout(() => showDictionaryPopup(word, x, y, refreshWordsCallback), 600);
+        } else {
+          addBtn.textContent = '✗ Failed';
+          addBtn.style.color = '#f87171';
+          setTimeout(() => {
+            addBtn.disabled = false;
+            addBtn.textContent = 'Add Definition';
+            addBtn.style.color = '';
+          }, 2000);
         }
       } catch (error) {
         console.error('Error adding custom definition:', error);
-        alert('Failed to add definition');
-        addBtn.disabled = false;
-        addBtn.textContent = 'Add Definition';
+        addBtn.textContent = '✗ Failed';
+        addBtn.style.color = '#f87171';
+        setTimeout(() => {
+          addBtn.disabled = false;
+          addBtn.textContent = 'Add Definition';
+          addBtn.style.color = '';
+        }, 2000);
       }
     };
 
@@ -928,15 +942,14 @@ function initializeDictionaryFeature(refreshWordsCallback) {
     }
   });
 
-  // Hide popup when shift is released (unless hovering over popup itself)
+  // Hide popup when shift is released (unless hovering over popup or a word)
   document.addEventListener('keyup', (e) => {
     if (e.key === 'Shift') {
-      // Small delay to allow moving to popup
       setTimeout(() => {
-        if (!dictionaryPopup || !dictionaryPopup.matches(':hover')) {
-          hideDictionaryPopup();
-        }
-      }, 100);
+        if (dictionaryPopup && dictionaryPopup.matches(':hover')) return;
+        if (document.querySelector(`.${window.CSS_CLASSES.WORD_HIGHLIGHT}:hover`)) return;
+        hideDictionaryPopup();
+      }, 250);
     }
   });
 }

@@ -163,7 +163,7 @@ async function refreshWords() {
   refreshBtn.innerHTML = '<span class="spinner"></span> Refreshing...';
 
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'fetchWords' });
+    const response = await chrome.runtime.sendMessage({ action: 'refreshWords' });
 
     if (response.success) {
       // Update display
