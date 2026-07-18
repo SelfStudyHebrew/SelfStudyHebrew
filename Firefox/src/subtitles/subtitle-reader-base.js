@@ -386,36 +386,46 @@
       top: 100px;
       right: 20px;
       padding: 10px 14px;
-      background: #5a7fff;
-      color: white;
-      border: none;
+      background: #13131a;
+      color: #ededf5;
+      border: 1px solid #2c2c3e;
+      border-left: 2px solid #5a7fff;
       border-radius: 8px;
       cursor: move;
       font-size: 13px;
       font-weight: 600;
       z-index: 9999;
-      box-shadow: 0 4px 16px rgba(90,127,255,0.40);
+      box-shadow: -2px 4px 16px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03);
       display: none;
       user-select: none;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      transition: background 0.15s ease, border-color 0.15s ease;
     `;
 
     // Make show button draggable
     let isDragging = false;
+    let hasDragged = false;
     let currentX;
     let currentY;
     let initialX;
     let initialY;
 
+    showBtn.addEventListener('mouseenter', () => { showBtn.style.background = '#1e1e2a'; showBtn.style.borderLeftColor = '#7a9fff'; });
+    showBtn.addEventListener('mouseleave', () => { showBtn.style.background = '#13131a'; showBtn.style.borderLeftColor = '#5a7fff'; });
+
     showBtn.addEventListener('mousedown', (e) => {
       isDragging = true;
-      initialX = e.clientX - (parseInt(showBtn.style.left) || 0);
-      initialY = e.clientY - (parseInt(showBtn.style.top) || 0);
+      hasDragged = false;
+      const rect = showBtn.getBoundingClientRect();
+      initialX = e.clientX - rect.left;
+      initialY = e.clientY - rect.top;
       showBtn.style.cursor = 'grabbing';
     });
 
     document.addEventListener('mousemove', (e) => {
       if (isDragging) {
         e.preventDefault();
+        hasDragged = true;
         currentX = e.clientX - initialX;
         currentY = e.clientY - initialY;
 
@@ -432,12 +442,13 @@
       }
     });
 
-    // Show button click - restore browser
+    // Show button click - restore browser (only if not a drag)
     showBtn.addEventListener('click', (e) => {
-      if (!isDragging) {
+      if (!hasDragged) {
         browser.style.display = 'block';
         showBtn.style.display = 'none';
       }
+      hasDragged = false;
     });
 
     // Append show button to body

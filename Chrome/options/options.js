@@ -846,6 +846,7 @@ resetTranslatePromptBtn.addEventListener('click', () => {
 
 const SPEND_LABELS = {
   subtitleTranslation: 'Subtitle Translations',
+  subtitleGeneration:  'Subtitle Generation (Whisper)',
   sentenceTranslation: 'Sentence Translations',
   wordDefinition:      'Word Definitions',
   sentenceGeneration:  'Sentence Generation',

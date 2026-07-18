@@ -266,6 +266,8 @@
       const container = document.getElementById('anki-youtube-subtitle-browser-list');
       if (!container) return;
 
+      const hexToRgb = h => [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+
       const items = container.querySelectorAll('[data-index]');
       items.forEach((item, i) => {
         const isI1 = item.classList.contains('anki-i1-sentence');
@@ -302,6 +304,17 @@
         activeElement.isContentEditable
       )) {
         return; // Let user use arrow keys normally in text fields
+      }
+
+      // e: reveal blurred translation overlay
+      if (e.key === 'e') {
+        const overlay = reader.translationOverlay;
+        if (overlay && overlay.style.display !== 'none' && overlay.style.filter !== 'none') {
+          overlay.style.filter = 'none';
+          overlay.style.cursor = 'default';
+          overlay.title = '';
+        }
+        return;
       }
 
       // Left arrow: previous subtitle

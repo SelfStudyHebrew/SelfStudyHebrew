@@ -306,6 +306,17 @@
         return; // Let user use arrow keys normally in text fields
       }
 
+      // e: reveal blurred translation overlay
+      if (e.key === 'e') {
+        const overlay = reader.translationOverlay;
+        if (overlay && overlay.style.display !== 'none' && overlay.style.filter !== 'none') {
+          overlay.style.filter = 'none';
+          overlay.style.cursor = 'default';
+          overlay.title = '';
+        }
+        return;
+      }
+
       // Left arrow: previous subtitle
       if (e.key === 'ArrowLeft') {
         e.preventDefault(); // Prevent default behavior

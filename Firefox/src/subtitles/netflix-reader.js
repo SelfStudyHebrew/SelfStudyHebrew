@@ -642,6 +642,17 @@
         return;
       }
 
+      // e: reveal blurred translation overlay
+      if (e.key === 'e') {
+        const overlay = this.translationOverlay;
+        if (overlay && overlay.style.display !== 'none' && overlay.style.filter !== 'none') {
+          overlay.style.filter = 'none';
+          overlay.style.cursor = 'default';
+          overlay.title = '';
+        }
+        return;
+      }
+
       // Only handle arrow keys if we have subtitles loaded
       if (!this.subtitles || this.subtitles.length === 0) return;
 

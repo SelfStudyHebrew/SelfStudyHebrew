@@ -421,6 +421,17 @@
       const active = document.activeElement;
       if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) return;
 
+      // e: reveal blurred translation overlay
+      if (e.key === 'e') {
+        const overlay = reader.translationOverlay;
+        if (overlay && overlay.style.display !== 'none' && overlay.style.filter !== 'none') {
+          overlay.style.filter = 'none';
+          overlay.style.cursor = 'default';
+          overlay.title = '';
+        }
+        return;
+      }
+
       const subtitles = reader.subtitles;
       if (!subtitles || subtitles.length === 0) return;
 
