@@ -846,7 +846,8 @@
             const wasPlaying = this.currentVideo && !this.currentVideo.paused;
             if (wasPlaying) this.currentVideo.pause();
             const onClose = wasPlaying ? () => { this.currentVideo?.play(); } : null;
-            window.openAnkiModal(sentenceText, getWordsCallback, audioResult?.filename || null, audioResult?.blobUrl || null, onClose);
+            const translation = this.translations?.[index] || null;
+            window.openAnkiModal(sentenceText, getWordsCallback, audioResult?.filename || null, audioResult?.blobUrl || null, onClose, translation);
             return;
           }
 
@@ -866,7 +867,10 @@
           const wasPlaying = this.currentVideo && !this.currentVideo.paused;
           if (wasPlaying) this.currentVideo.pause();
           const onClose = wasPlaying ? () => { this.currentVideo?.play(); } : null;
-          window.openAnkiModal(mergedText, getWordsCallback, audioResult?.filename || null, audioResult?.blobUrl || null, onClose);
+          const rangeTranslation = this.translations
+            ? rangedSubs.map((_, i) => this.translations[minIdx + i]).filter(Boolean).join(' ')
+            : null;
+          window.openAnkiModal(mergedText, getWordsCallback, audioResult?.filename || null, audioResult?.blobUrl || null, onClose, rangeTranslation || null);
           return;
         }
 

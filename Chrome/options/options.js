@@ -71,6 +71,7 @@ const defaultDeckSelect = document.getElementById('default-deck');
 const defaultNoteTypeSelect = document.getElementById('default-note-type');
 const audioFieldNameInput = document.getElementById('audio-field-name');
 const imageFieldNameInput = document.getElementById('image-field-name');
+const meaningFieldNameInput = document.getElementById('meaning-field-name');
 const sentenceColorInput = document.getElementById('sentence-color');
 const sentenceColorText = document.getElementById('sentence-color-text');
 const resetSentenceColorBtn = document.getElementById('reset-sentence-color-btn');
@@ -294,6 +295,7 @@ async function loadSettings() {
       stripNikudEnabled.checked = settings.stripNikudEnabled || false;
       audioFieldNameInput.value = settings.audioFieldName || 'Audio';
       imageFieldNameInput.value = settings.imageFieldName || 'Image';
+      meaningFieldNameInput.value = settings.meaningFieldName || 'English';
       fieldNameInput.value = settings.fieldName;
       deckFilterInput.value = settings.deckFilter || '';
       matureThresholdInput.value = settings.matureThreshold || 21;
@@ -415,6 +417,7 @@ async function saveSettings() {
     settings.defaultNoteType = defaultNoteTypeSelect.value;
     settings.audioFieldName = audioFieldNameInput.value.trim() || 'Audio';
     settings.imageFieldName = imageFieldNameInput.value.trim() || 'Image';
+    settings.meaningFieldName = meaningFieldNameInput.value.trim() || 'English';
     settings.sentenceColor = sentenceColor;
     settings.potentiallyI1Color = potentiallyI1ColorText.value;
     settings.sentenceHighlightEnabled = sentenceHighlightEnabled.checked;

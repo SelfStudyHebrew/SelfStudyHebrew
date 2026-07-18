@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   defaultNoteType: 'SelfStudyHebrew',  // Default note type for card creation
   audioFieldName: 'Audio',  // Field name for subtitle audio recordings
   imageFieldName: 'Image',  // Field name for image search
+  meaningFieldName: 'English',  // Field name for pre-filling subtitle translation
   geminiApiKey: '',  // Google Gemini API key for AI image generation
   cloudflareAccountId: '',  // Cloudflare Account ID for free AI image generation
   cloudflareApiToken: '',  // Cloudflare API Token (Workers AI:Run permission)

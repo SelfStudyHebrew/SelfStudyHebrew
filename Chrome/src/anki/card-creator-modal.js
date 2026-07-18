@@ -8,6 +8,7 @@ let ankiModal = null;
 let currentSentence = null;
 let currentAudioFilename = null;
 let currentAudioBlobUrl = null;
+let currentTranslation = null;
 let onModalCloseCallback = null;
 let pendingGeneratedImage = null; // Holds generated image data until card is actually created
 
@@ -958,6 +959,7 @@ async function loadModelFields(getWordsCallback) {
     ]);
     const audioFieldName = settingsResponse.settings?.audioFieldName || 'Audio';
     const imageFieldName = settingsResponse.settings?.imageFieldName || 'Image';
+    const meaningFieldName = settingsResponse.settings?.meaningFieldName || 'English';
 
     const response = fieldsResponse;
 
@@ -1111,6 +1113,14 @@ async function loadModelFields(getWordsCallback) {
 
       if (response.fields.length > 0) {
         fillSentenceField();
+
+        // Pre-fill Meaning field with subtitle translation if available
+        if (currentTranslation && meaningFieldName) {
+          const allTextareas = Array.from(ankiModal.querySelectorAll('textarea[data-field-name]'));
+          const meaningTextarea = allTextareas.find(t => t.dataset.fieldName === meaningFieldName);
+          if (meaningTextarea) meaningTextarea.value = currentTranslation;
+        }
+
         // Pre-fill Audio field textarea if recorded audio exists, and add play button
         if (currentAudioFilename) {
           const allFieldTextareas = Array.from(ankiModal.querySelectorAll('textarea[data-field-name]'));
@@ -1372,6 +1382,7 @@ function closeAnkiModal() {
   }
   currentSentence = null;
   currentAudioFilename = null;
+  currentTranslation = null;
   pendingGeneratedImage = null;
   const contextEl = ankiModal && ankiModal.querySelector('#anki-ai-context');
   if (contextEl) { contextEl.value = ''; contextEl.style.display = 'none'; }
@@ -1643,9 +1654,10 @@ function createAnkiModal(getWordsCallback) {
  * @param {string} sentence - Hebrew sentence to create card from
  * @param {Function} getWordsCallback - Callback to get word lists
  */
-async function openAnkiModal(sentence, getWordsCallback, audioFilename = null, audioBlobUrl = null, onClose = null) {
+async function openAnkiModal(sentence, getWordsCallback, audioFilename = null, audioBlobUrl = null, onClose = null, translation = null) {
   currentSentence = sentence;
   currentAudioFilename = audioFilename;
+  currentTranslation = translation;
   onModalCloseCallback = onClose;
   if (audioBlobUrl) {
     if (currentAudioBlobUrl) URL.revokeObjectURL(currentAudioBlobUrl);
