@@ -728,11 +728,16 @@ async function callClaudeAPI(apiKey, prompt, options = {}) {
   return { text: data.content[0].text, usage: data.usage || {} };
 }
 
-// Add cost to the running total in storage
-async function accumulateSpend(cost) {
+// Add cost to the running total and per-type breakdown in storage
+async function accumulateSpend(cost, type = 'other') {
   if (!cost) return;
-  const data = await chrome.storage.local.get('claudeSpendTotal');
-  await chrome.storage.local.set({ claudeSpendTotal: (data.claudeSpendTotal || 0) + cost });
+  const data = await chrome.storage.local.get(['claudeSpendTotal', 'claudeSpendBreakdown']);
+  const breakdown = data.claudeSpendBreakdown || {};
+  breakdown[type] = (breakdown[type] || 0) + cost;
+  await chrome.storage.local.set({
+    claudeSpendTotal: (data.claudeSpendTotal || 0) + cost,
+    claudeSpendBreakdown: breakdown
+  });
 }
 
 // Calculate cost of a Claude API call from usage metadata
@@ -1422,7 +1427,7 @@ const MESSAGE_HANDLERS = {
         return translateSentence(request.sentence, apiKey, model, request.context || '', customPrompt);
       })
       .then(async ({ text, cost }) => {
-        await accumulateSpend(cost);
+        await accumulateSpend(cost, 'sentenceTranslation');
         sendResponse({ success: true, result: text });
       })
       .catch(error => sendResponse({ success: false, error: error.message }));
@@ -1441,7 +1446,7 @@ const MESSAGE_HANDLERS = {
         return defineWord(request.sentence, request.word, apiKey, model, customPrompt);
       })
       .then(async ({ text, cost }) => {
-        await accumulateSpend(cost);
+        await accumulateSpend(cost, 'wordDefinition');
         sendResponse({ success: true, result: text });
       })
       .catch(error => sendResponse({ success: false, error: error.message }));
@@ -1460,7 +1465,7 @@ const MESSAGE_HANDLERS = {
         return defineWords(request.sentence, request.words, apiKey, model, customPrompt, request.context || '');
       })
       .then(async ({ text, cost }) => {
-        await accumulateSpend(cost);
+        await accumulateSpend(cost, 'wordDefinition');
         sendResponse({ success: true, result: text });
       })
       .catch(error => sendResponse({ success: false, error: error.message }));
@@ -1631,7 +1636,7 @@ const MESSAGE_HANDLERS = {
         }
 
         // Accumulate total spend in storage
-        await accumulateSpend(sessionCost);
+        await accumulateSpend(sessionCost, 'sentenceGeneration');
         const spendData = await chrome.storage.local.get('claudeSpendTotal');
         const newTotal = spendData.claudeSpendTotal || 0;
 
@@ -1826,6 +1831,46 @@ const MESSAGE_HANDLERS = {
     return true;
   },
 
+  translateSubtitles: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get('settings');
+        const apiKey = data.settings?.claudeApiKey;
+        if (!apiKey) {
+          sendResponse({ success: false, error: 'Claude API key not configured in Settings' });
+          return;
+        }
+        const prompt = `Translate these Hebrew subtitle lines to English. Return ONLY a valid JSON array of strings with one translation per subtitle in the same order. No explanation, no markdown, just the JSON array.\n\n${JSON.stringify(request.subtitles)}`;
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 8192,
+            messages: [{ role: 'user', content: prompt }]
+          })
+        });
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`Claude API ${response.status}: ${err.slice(0, 200)}`);
+        }
+        const json = await response.json();
+        const text = json.content[0].text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+        const translations = JSON.parse(text);
+        if (!Array.isArray(translations)) throw new Error('Unexpected response format');
+        sendResponse({ success: true, translations });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true;
+  },
+
   generateCloudflareImage: (request, sender, sendResponse) => {
     (async () => {
       try {
@@ -1883,6 +1928,11 @@ const MESSAGE_HANDLERS = {
         sendResponse({ success: false, error: error.message });
       }
     })();
+    return true;
+  },
+
+  accumulateSpend: (request, sender, sendResponse) => {
+    accumulateSpend(request.cost, request.type || 'subtitleTranslation').then(() => sendResponse({ success: true }));
     return true;
   }
 };

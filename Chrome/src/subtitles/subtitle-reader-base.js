@@ -17,12 +17,15 @@
     this.subtitles = [];
     this.currentSubtitleIndex = -1;
     this.subtitleOverlay = null;
+    this.translationOverlay = null;
     this.subtitleBrowser = null;
     this.currentVideo = null;
     this.comprehensionStats = { total: 0, known: 0, potentiallyKnown: 0, percentage: 0, i1Sentences: 0, potentiallyI1Sentences: 0 };
     this.stripNikudEnabled = false;
     this.sentenceColor = '#5a7fff';
     this.potentiallyI1Color = '#9b6bff';
+    this.translations = null;
+    this.translationsVisible = false;
     this.isEnabled = true;
     this.audioContext = null;
     this.audioSourceNode = null;
@@ -137,6 +140,50 @@
 
     this.subtitleOverlay = overlay;
 
+    // Translation overlay — sits directly below the Hebrew subtitle
+    const translationOverlay = document.createElement('div');
+    translationOverlay.id = overlayId + '-translation';
+    translationOverlay.style.cssText = `
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10000;
+      background: rgba(0, 0, 0, 0.75);
+      color: #d0d0d0;
+      padding: 4px 14px;
+      border-radius: 4px;
+      font-size: 20px;
+      font-style: italic;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      text-align: center;
+      direction: ltr;
+      max-width: 80%;
+      pointer-events: auto;
+      cursor: pointer;
+      display: none;
+      filter: blur(6px);
+      transition: filter 0.15s ease;
+      user-select: none;
+    `;
+    translationOverlay.title = 'Click to reveal translation';
+    translationOverlay.addEventListener('click', () => {
+      translationOverlay.style.filter = 'none';
+      translationOverlay.style.cursor = 'default';
+      translationOverlay.title = '';
+    });
+    try {
+      if (isInIframe && window.top.document.body) {
+        window.top.document.body.appendChild(translationOverlay);
+      } else {
+        document.body.appendChild(translationOverlay);
+      }
+    } catch (e) {
+      document.body.appendChild(translationOverlay);
+      translationOverlay.style.zIndex = '2147483647';
+    }
+    this.translationOverlay = translationOverlay;
+
     // Center overlay with video dynamically
     this.centerOverlayWithVideo();
 
@@ -155,6 +202,11 @@
 
       overlay.style.left = `${videoCenter}px`;
       overlay.style.transform = 'translateX(-50%)';
+
+      if (this.translationOverlay) {
+        this.translationOverlay.style.left = `${videoCenter}px`;
+        this.translationOverlay.style.transform = 'translateX(-50%)';
+      }
     };
 
     // Update position initially
@@ -407,6 +459,113 @@
     });
     header.appendChild(toggleBtn);
 
+    // Translate button
+    const translateBtn = document.createElement('button');
+    translateBtn.id = `${browserId}-translate-btn`;
+    translateBtn.textContent = 'Translate';
+    translateBtn.style.cssText = `width: 100%; padding: 8px; background: #21212e; color: #ededf5; border: 1px solid #2c2c3e; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; transition: background 0.15s ease; margin-top: 6px;`;
+    translateBtn.addEventListener('mouseenter', () => { translateBtn.style.background = '#2c2c3e'; });
+    translateBtn.addEventListener('mouseleave', () => { translateBtn.style.background = this.translationsVisible ? '#1e3a5f' : '#21212e'; });
+    translateBtn.addEventListener('click', async () => {
+      if (this.translations) {
+        // Toggle visibility
+        this.translationsVisible = !this.translationsVisible;
+        translateBtn.textContent = this.translationsVisible ? 'Hide Translation' : 'Show Translation';
+        translateBtn.style.background = this.translationsVisible ? '#1e3a5f' : '#21212e';
+        this.populateSubtitleBrowser();
+        // Immediately update translation overlay for current subtitle
+        if (this.translationOverlay) {
+          if (this.translationsVisible && this.currentSubtitleIndex >= 0 && this.translations[this.currentSubtitleIndex]) {
+            this._showTranslationOverlay(this.translations[this.currentSubtitleIndex]);
+          } else {
+            this.translationOverlay.style.display = 'none';
+          }
+        }
+        return;
+      }
+      // Check cache before hitting the API
+      translateBtn.textContent = '⏳ Loading…';
+      translateBtn.disabled = true;
+      translateBtn.style.opacity = '0.6';
+      try {
+        const cached = await this._loadTranslationCache();
+        if (cached) {
+          this.translations = cached;
+          this._activeTranslationKey = this._translationCacheKey();
+          this.translationsVisible = true;
+          translateBtn.textContent = 'Hide Translation';
+          translateBtn.style.background = '#1e3a5f';
+          this.populateSubtitleBrowser();
+          if (this.currentSubtitleIndex >= 0 && cached[this.currentSubtitleIndex]) {
+            this._showTranslationOverlay(cached[this.currentSubtitleIndex]);
+          }
+          translateBtn.disabled = false;
+          translateBtn.style.opacity = '1';
+          return;
+        }
+      } catch (e) { /* cache miss, fall through */ }
+
+      // Fetch translations directly (avoids service worker timeout)
+      translateBtn.textContent = '⏳ Translating…';
+      try {
+        const data = await chrome.storage.local.get('settings');
+        const apiKey = data.settings?.claudeApiKey;
+        if (!apiKey) throw new Error('Claude API key not configured in Settings');
+
+        const prompt = `Translate these Hebrew subtitle lines to English. Return ONLY a valid JSON array of strings with one translation per subtitle in the same order. No explanation, no markdown, just the JSON array.\n\n${JSON.stringify(this.subtitles.map(s => s.text))}`;
+
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+            'content-type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 8192,
+            messages: [{ role: 'user', content: prompt }]
+          })
+        });
+
+        if (!response.ok) {
+          const err = await response.text();
+          throw new Error(`Claude API ${response.status}: ${err.slice(0, 200)}`);
+        }
+
+        const json = await response.json();
+        const text = json.content[0].text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+        const translations = JSON.parse(text);
+        if (!Array.isArray(translations)) throw new Error('Unexpected response format');
+
+        // Track spend (Haiku pricing: $0.80/M input, $4.00/M output)
+        const usage = json.usage || {};
+        const cost = ((usage.input_tokens || 0) / 1_000_000) * 0.80
+                   + ((usage.output_tokens || 0) / 1_000_000) * 4.0;
+        if (cost > 0) chrome.runtime.sendMessage({ action: 'accumulateSpend', cost });
+
+        this.translations = translations;
+        this._activeTranslationKey = this._translationCacheKey();
+        this.translationsVisible = true;
+        this._saveTranslationCache(translations);
+        translateBtn.textContent = 'Hide Translation';
+        translateBtn.style.background = '#1e3a5f';
+        this.populateSubtitleBrowser();
+        // Show translation for current subtitle immediately
+        if (this.currentSubtitleIndex >= 0 && translations[this.currentSubtitleIndex]) {
+          this._showTranslationOverlay(translations[this.currentSubtitleIndex]);
+        }
+      } catch (err) {
+        translateBtn.textContent = 'Translate';
+        alert(`Translation failed: ${err.message}`);
+      } finally {
+        translateBtn.disabled = false;
+        translateBtn.style.opacity = '1';
+      }
+    });
+    header.appendChild(translateBtn);
+
     browser.appendChild(header);
 
     // Subtitles container
@@ -538,6 +697,21 @@
     if (!this.subtitleBrowser || this.subtitles.length === 0) {
       console.log(`[${this.platformName} Subs] populateSubtitleBrowser aborted - browser:`, !!this.subtitleBrowser, 'subtitles:', this.subtitles.length);
       return;
+    }
+
+    // If the URL changed (e.g. new episode loaded), in-memory translations are stale — reset them
+    if (this.translations && this._activeTranslationKey !== this._translationCacheKey()) {
+      this.translations = null;
+      this.translationsVisible = false;
+      this._activeTranslationKey = null;
+      if (this.translationOverlay) this.translationOverlay.style.display = 'none';
+      const btn = this.subtitleBrowser ? this.subtitleBrowser.querySelector('[id$="-translate-btn"]') : null;
+      if (btn) {
+        btn.textContent = 'Translate';
+        btn.style.background = '#21212e';
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
     }
 
     // Use direct reference to avoid ID collision when multiple readers exist (SPA navigation)
@@ -767,9 +941,95 @@
 
       item.appendChild(text);
 
+      // Translation line (shown when translations are fetched and visible)
+      if (this.translationsVisible && this.translations?.[index]) {
+        const translation = document.createElement('div');
+        translation.textContent = this.translations[index];
+        translation.style.cssText = `
+          font-size: 13px;
+          color: #9b9bb5;
+          margin-top: 4px;
+          direction: ltr;
+          font-style: italic;
+        `;
+        item.appendChild(translation);
+      }
+
       container.appendChild(item);
     });
   }
+
+  // ── Translation cache (chrome.storage.local, 7-day TTL) ──────────────────
+
+  _translationCacheKey() {
+    try {
+      const url = new URL(window.location.href);
+      if (url.hostname.includes('youtube.com')) {
+        const v = url.searchParams.get('v');
+        if (v) return `ssh_trans_yt_${v}`;
+      }
+      // For all other platforms include query params — they identify the specific episode
+      // e.g. streamisrael.tv/programs/asfur?cid=4690406 vs cid=4690407
+      const qs = url.search; // includes the leading '?'
+      return `ssh_trans_${url.origin}${url.pathname}${qs}`;
+    } catch (e) {
+      return `ssh_trans_${window.location.href}`;
+    }
+  }
+
+  async _loadTranslationCache() {
+    try {
+      const key = this._translationCacheKey();
+      const data = await chrome.storage.local.get(key);
+      const entry = data[key];
+      if (!entry) return null;
+      if (Date.now() - entry.timestamp > 7 * 24 * 60 * 60 * 1000) {
+        chrome.storage.local.remove(key);
+        return null;
+      }
+      return entry.translations;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async _saveTranslationCache(translations) {
+    try {
+      const key = this._translationCacheKey();
+      await chrome.storage.local.set({ [key]: { translations, timestamp: Date.now() } });
+      // Prune any other expired ssh_trans_ entries
+      chrome.storage.local.get(null).then(all => {
+        const expired = Object.keys(all).filter(k =>
+          k.startsWith('ssh_trans_') && Date.now() - (all[k]?.timestamp ?? 0) > 7 * 24 * 60 * 60 * 1000
+        );
+        if (expired.length) chrome.storage.local.remove(expired);
+      });
+    } catch (e) { /* non-fatal */ }
+  }
+
+  _showTranslationOverlay(text) {
+    if (!this.translationOverlay) return;
+    this.translationOverlay.textContent = text;
+    this.translationOverlay.style.display = 'block';
+    // Re-apply blur for each new subtitle
+    this.translationOverlay.style.filter = 'blur(6px)';
+    this.translationOverlay.style.cursor = 'pointer';
+    this.translationOverlay.title = 'Click to reveal translation';
+    // Position dynamically below (and centred on) the Hebrew overlay
+    if (this.subtitleOverlay) {
+      requestAnimationFrame(() => {
+        if (!this.subtitleOverlay || !this.translationOverlay) return;
+        const rect = this.subtitleOverlay.getBoundingClientRect();
+        const center = rect.left + rect.width / 2;
+        this.translationOverlay.style.bottom = 'auto';
+        this.translationOverlay.style.top = `${rect.bottom + 6}px`;
+        this.translationOverlay.style.left = `${center}px`;
+        this.translationOverlay.style.transform = 'translateX(-50%)';
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   /**
    * Clear the multi-subtitle anchor selection, restoring item styles
@@ -863,6 +1123,13 @@
         } else {
           this.subtitleOverlay.style.display = 'none';
         }
+      }
+
+      // Update translation overlay
+      if (foundIndex !== -1 && this.translationsVisible && this.translations?.[foundIndex]) {
+        this._showTranslationOverlay(this.translations[foundIndex]);
+      } else if (this.translationOverlay) {
+        this.translationOverlay.style.display = 'none';
       }
 
       if (this.subtitleBrowser) {
@@ -1130,6 +1397,10 @@
       this.subtitleOverlay.remove();
       this.subtitleOverlay = null;
     }
+    if (this.translationOverlay) {
+      this.translationOverlay.remove();
+      this.translationOverlay = null;
+    }
     if (this.subtitleBrowser) {
       this.subtitleBrowser.remove();
       this.subtitleBrowser = null;
@@ -1139,6 +1410,8 @@
     this.selectedSubIndex = null;
     this.currentSubtitleIndex = -1;
     this.currentVideo = null;
+    this.translations = null;
+    this.translationsVisible = false;
   }
 }
 

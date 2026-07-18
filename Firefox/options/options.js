@@ -844,24 +844,46 @@ resetTranslatePromptBtn.addEventListener('click', () => {
   });
 });
 
+const SPEND_LABELS = {
+  subtitleTranslation: 'Subtitle Translations',
+  sentenceTranslation: 'Sentence Translations',
+  wordDefinition:      'Word Definitions',
+  sentenceGeneration:  'Sentence Generation',
+  other:               'Other',
+};
+
+function formatCost(c) { return c < 0.0001 && c > 0 ? '<$0.0001' : `$${c.toFixed(4)}`; }
+
 // Load and display Claude spend total
 async function loadSpendTotal() {
-  const data = await chrome.storage.local.get('claudeSpendTotal');
+  const data = await chrome.storage.local.get(['claudeSpendTotal', 'claudeSpendBreakdown']);
   const total = data.claudeSpendTotal || 0;
-  spendTotal.textContent = total < 0.0001 && total > 0 ? '<$0.0001' : `$${total.toFixed(4)}`;
+  spendTotal.textContent = formatCost(total);
+  const breakdown = data.claudeSpendBreakdown || {};
+  const breakdownEl = document.getElementById('spend-breakdown');
+  const rowsEl = document.getElementById('spend-breakdown-rows');
+  const entries = Object.entries(breakdown).filter(([, v]) => v > 0);
+  if (entries.length > 0) {
+    rowsEl.innerHTML = entries
+      .sort(([, a], [, b]) => b - a)
+      .map(([type, cost]) => `<tr><td style="padding:2px 0;color:#aaa;">${SPEND_LABELS[type] || type}</td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;">${formatCost(cost)}</td></tr>`)
+      .join('');
+    breakdownEl.style.display = 'block';
+  } else {
+    breakdownEl.style.display = 'none';
+  }
 }
 
 resetSpendBtn.addEventListener('click', async () => {
   if (!confirm('Reset the Claude API spend total to $0.00?')) return;
-  await chrome.storage.local.set({ claudeSpendTotal: 0 });
+  await chrome.storage.local.set({ claudeSpendTotal: 0, claudeSpendBreakdown: {} });
   loadSpendTotal();
 });
 
 // Keep spend total live — update whenever background writes a new value
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.claudeSpendTotal) {
-    const total = changes.claudeSpendTotal.newValue || 0;
-    spendTotal.textContent = total < 0.0001 && total > 0 ? '<$0.0001' : `$${total.toFixed(4)}`;
+  if (area === 'local' && (changes.claudeSpendTotal || changes.claudeSpendBreakdown)) {
+    loadSpendTotal();
   }
 });
 

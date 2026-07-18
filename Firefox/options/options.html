@@ -27,7 +27,12 @@
           <span style="font-size:22px;font-weight:700;" id="spend-total">$0.0000</span>
           <button type="button" id="reset-spend-btn" style="font-size:12px;padding:4px 10px;">Reset total</button>
         </div>
-        <p class="description">Running total of Claude API costs tracked by the extension (sentence generation only). Resets to zero if you click "Reset total".</p>
+        <div id="spend-breakdown" style="margin-top:8px;display:none;">
+          <table style="font-size:13px;border-collapse:collapse;width:100%;max-width:380px;">
+            <tbody id="spend-breakdown-rows"></tbody>
+          </table>
+        </div>
+        <p class="description">Running total of Claude API costs tracked by the extension. Resets to zero if you click "Reset total".</p>
       </div>
 
       <div class="setting-item">

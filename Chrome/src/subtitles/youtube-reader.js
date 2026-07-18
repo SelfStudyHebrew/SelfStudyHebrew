@@ -245,6 +245,13 @@
           }
         }
 
+        // Update translation overlay
+        if (foundIndex !== -1 && this.translationsVisible && this.translations?.[foundIndex]) {
+          this._showTranslationOverlay(this.translations[foundIndex]);
+        } else if (this.translationOverlay) {
+          this.translationOverlay.style.display = 'none';
+        }
+
         // Update browser highlight
         this.updateBrowserHighlight(foundIndex);
       }

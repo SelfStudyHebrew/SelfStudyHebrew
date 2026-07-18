@@ -34,8 +34,8 @@
    */
   async function calculateComprehensionStats(subtitles) {
     try {
-      // Get word lists from extension storage
-      const wordsData = await chrome.runtime.sendMessage({ action: 'getWords' });
+      // Get word lists directly from storage (avoids service worker round-trip race condition)
+      const wordsData = await chrome.storage.local.get(['matureWords', 'learningWords', 'ignoredWords']);
       const matureWords = wordsData.matureWords || [];
       const learningWords = wordsData.learningWords || [];
       const ignoredWords = wordsData.ignoredWords || [];
