@@ -871,14 +871,21 @@ async function loadSpendTotal() {
   const rowsEl = document.getElementById('spend-breakdown-rows');
   const entries = Object.entries(breakdown).filter(([, v]) => v > 0);
   if (entries.length > 0) {
-    rowsEl.innerHTML = entries
+    rowsEl.textContent = '';
+    entries
       .sort(([, a], [, b]) => b - a)
-      .map(([type, cost]) => `
-        <tr>
-          <td style="padding:2px 0;color:#aaa;">${SPEND_LABELS[type] || type}</td>
-          <td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;">${formatCost(cost)}</td>
-        </tr>`)
-      .join('');
+      .forEach(([type, cost]) => {
+        const tr = document.createElement('tr');
+        const tdLabel = document.createElement('td');
+        tdLabel.style.cssText = 'padding:2px 0;color:#aaa;';
+        tdLabel.textContent = SPEND_LABELS[type] || type;
+        const tdCost = document.createElement('td');
+        tdCost.style.cssText = 'padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;';
+        tdCost.textContent = formatCost(cost);
+        tr.appendChild(tdLabel);
+        tr.appendChild(tdCost);
+        rowsEl.appendChild(tr);
+      });
     breakdownEl.style.display = 'block';
   } else {
     breakdownEl.style.display = 'none';
