@@ -86,6 +86,22 @@
    * @param {Array} learningWords - Array of learning words
    * @returns {string} 'known', 'potentially-known', or 'unknown'
    */
+  // Plural / feminine forms of a known word (בנים, שפות, חבר -> חברה ...)
+  function hasKnownInflectedBase(word, matureWords, learningWords) {
+    const isKnown = w => matureWords.includes(w) || learningWords.includes(w);
+    const tryBase = (base, minLen) => base.length >= minLen && isKnown(base);
+    for (const suffix of ['ים', 'ות']) {
+      if (word.endsWith(suffix)) {
+        const base = word.slice(0, -suffix.length);
+        if (tryBase(base, 2) || tryBase(base + 'ה', 3) || tryBase(base + 'ת', 3)) return true;
+      }
+    }
+    for (const suffix of ['ה', 'ת']) {
+      if (word.endsWith(suffix) && tryBase(word.slice(0, -1), 3)) return true;
+    }
+    return false;
+  }
+
   function getWordKnownType(normalizedWord, matureWords, learningWords, ignoredWords = []) {
     // Ignored words are treated as skipped — not unknown — for i+1 purposes
     if (ignoredWords.length > 0 && ignoredWords.includes(normalizedWord)) return 'ignored';
@@ -101,14 +117,21 @@
       }
     }
 
-    const prefixes = ['ל', 'ב', 'ש'];
+    const prefixes = ['ל', 'ב', 'ש', 'ה'];
     for (const prefix of prefixes) {
-      if (normalizedWord.startsWith(prefix) && normalizedWord.length > 1) {
+      if (normalizedWord.startsWith(prefix) && normalizedWord.length > (prefix === 'ה' ? 3 : 1)) {
         const withoutPrefix = normalizedWord.substring(1);
         if (matureWords.includes(withoutPrefix) || learningWords.includes(withoutPrefix)) {
           return 'potentially-known';
         }
       }
+    }
+
+    // Plural / feminine form of a known word, with or without a single prefix
+    if (hasKnownInflectedBase(normalizedWord, matureWords, learningWords)) return 'potentially-known';
+    if (normalizedWord.length > 3 && 'ולבשה'.includes(normalizedWord[0]) &&
+        hasKnownInflectedBase(normalizedWord.substring(1), matureWords, learningWords)) {
+      return 'potentially-known';
     }
 
     return 'unknown';
@@ -132,5 +155,6 @@
   window.extractHebrewWords = extractHebrewWords;
   window.isHebrewWord = isHebrewWord;
   window.getWordKnownType = getWordKnownType;
+  window.hasKnownInflectedBase = hasKnownInflectedBase;
   window.isWordKnown = isWordKnown;
 })();

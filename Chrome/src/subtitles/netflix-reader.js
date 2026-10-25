@@ -500,6 +500,9 @@
    * Initialize Netflix subtitle reader
    */
   async initialize() {
+    // Respect "Enable Subtitle Reader" setting — don't touch Netflix's subtitles at all when off
+    if (!(await this.waitUntilReaderEnabled())) return;
+
     this.setupMessageListener();
 
     this.injectInterceptor();

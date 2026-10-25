@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SelfStudyHebrew - Report a Bug</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #14141c; color: #ededf5; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 28px 20px 48px; }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .intro { color: #8f8fa8; margin: 0 0 22px; }
+    label { display: block; font-weight: 600; margin: 16px 0 6px; }
+    .hint { font-weight: 400; color: #8f8fa8; }
+    .req { color: #f87171; }
+    textarea, input[type="text"], input[type="email"] {
+      width: 100%; padding: 9px 11px; background: #1a1a24; color: #ededf5;
+      border: 1px solid #2c2c3e; border-radius: 6px; font: inherit; outline: none;
+    }
+    textarea { min-height: 84px; resize: vertical; }
+    textarea:focus, input:focus { border-color: #5a7fff; }
+    details { margin-top: 16px; }
+    summary { cursor: pointer; color: #8aabff; }
+    #environment { min-height: 150px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; color: #b8b8cc; margin-top: 8px; }
+    .actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 22px; }
+    button { padding: 9px 18px; border-radius: 6px; border: 1px solid transparent; font: inherit; font-weight: 600; cursor: pointer; }
+    #send-btn { background: #5a7fff; color: #fff; }
+    #send-btn:disabled { opacity: 0.6; cursor: default; }
+    #github-btn { background: transparent; color: #8aabff; border-color: #2c2c3e; font-weight: 500; }
+    #status { margin-top: 14px; min-height: 20px; }
+    #status.ok { color: #34d399; }
+    #status.err { color: #f87171; }
+    .privacy { color: #8f8fa8; font-size: 12.5px; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Report a Bug</h1>
+    <p class="intro">Tell me what went wrong and I'll look into it. No account needed.</p>
+
+    <form id="bug-form">
+      <label for="what">What went wrong? <span class="req">*</span></label>
+      <textarea id="what" required></textarea>
+
+      <label for="expected">What did you expect to happen? <span class="hint">(optional)</span></label>
+      <textarea id="expected"></textarea>
+
+      <label for="steps">Steps to reproduce <span class="hint">(optional)</span></label>
+      <textarea id="steps" placeholder="1. Go to...&#10;2. Click..."></textarea>
+
+      <label for="where">Where did it happen? <span class="hint">(e.g. YouTube, Netflix, card creator)</span></label>
+      <input type="text" id="where">
+
+      <label for="email">Your email <span class="hint">(optional — only if you'd like a reply)</span></label>
+      <input type="email" id="email" autocomplete="email">
+
+      <details>
+        <summary>Technical details sent with this report</summary>
+        <textarea id="environment" spellcheck="false"></textarea>
+      </details>
+
+      <div class="actions">
+        <button type="submit" id="send-btn">Send report</button>
+        <button type="button" id="github-btn" title="Opens a pre-filled issue on GitHub (needs a GitHub account)">Prefer GitHub? Open an issue</button>
+      </div>
+      <div id="status" role="status"></div>
+      <p class="privacy">Only the details shown above are sent — extension and browser versions and on/off settings. Your API keys, the pages you visit and your Anki cards are never included.</p>
+    </form>
+  </div>
+  <script src="../utils/bug-report.js"></script>
+  <script src="bugreport.js"></script>
+</body>
+</html>

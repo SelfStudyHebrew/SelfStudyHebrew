@@ -70,9 +70,14 @@
     </div>
 
     <div class="controls">
-      <button id="toggle-btn" class="btn btn-primary">
-        <span id="toggle-text">Disable Highlighting</span>
-      </button>
+      <div class="btn-row">
+        <button id="toggle-btn" class="btn btn-primary btn-half">
+          <span id="toggle-text">Disable Highlighting</span>
+        </button>
+        <button id="subtitle-reader-btn" class="btn btn-primary btn-half" title="Show/hide the subtitle overlay and subtitle browser on video sites">
+          <span id="subtitle-reader-text">Hide Subtitles</span>
+        </button>
+      </div>
       <button id="refresh-btn" class="btn btn-secondary">
         Refresh Words
       </button>
@@ -81,6 +86,9 @@
       </button>
       <button id="settings-btn" class="btn btn-secondary">
         Settings
+      </button>
+      <button id="report-bug-btn" class="btn btn-secondary" title="Report a bug — no account needed">
+        Report a Bug
       </button>
       <button id="coffee-btn" class="btn btn-coffee">
         ☕ Buy Me a Coffee
@@ -167,6 +175,7 @@
     </div>
   </div>
 
+  <script src="../src/utils/bug-report.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

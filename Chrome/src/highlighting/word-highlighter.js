@@ -55,15 +55,22 @@
 
     // Check for other common prefixes: ל (to/for), ב (in/with), ש (that/which)
     // If removing these reveals a known word, mark as "potentially-known"
-    const prefixes = ['ל', 'ב', 'ש'];
+    const prefixes = ['ל', 'ב', 'ש', 'ה'];
     for (const prefix of prefixes) {
-      if (normalized.startsWith(prefix) && normalized.length > 1) {
+      if (normalized.startsWith(prefix) && normalized.length > (prefix === 'ה' ? 3 : 1)) {
         const withoutPrefix = normalized.substring(1);
 
         if (matureWords.includes(withoutPrefix) || learningWords.includes(withoutPrefix)) {
           return 'potentially-known';
         }
       }
+    }
+
+    // Plural / feminine form of a known word, with or without a single prefix
+    if (window.hasKnownInflectedBase(normalized, matureWords, learningWords)) return 'potentially-known';
+    if (normalized.length > 3 && 'ולבשה'.includes(normalized[0]) &&
+        window.hasKnownInflectedBase(normalized.substring(1), matureWords, learningWords)) {
+      return 'potentially-known';
     }
 
     return 'unknown';

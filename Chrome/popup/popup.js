@@ -18,6 +18,8 @@ const pagePotentiallyI1 = document.getElementById('page-potentially-i1');
 const pageI1 = document.getElementById('page-i1');
 const toggleBtn = document.getElementById('toggle-btn');
 const toggleText = document.getElementById('toggle-text');
+const subtitleReaderBtn = document.getElementById('subtitle-reader-btn');
+const subtitleReaderText = document.getElementById('subtitle-reader-text');
 const refreshBtn = document.getElementById('refresh-btn');
 const settingsBtn = document.getElementById('settings-btn');
 const coffeeBtn = document.getElementById('coffee-btn');
@@ -137,7 +139,7 @@ async function updateStatus() {
     currentSettings = settingsResponse.settings;
 
     // Update toggle button
-    if (currentSettings.highlightEnabled) {
+    if (currentSettings.highlightEnabled !== false) {
       toggleText.textContent = 'Disable Highlighting';
       toggleBtn.classList.add('btn-primary');
       toggleBtn.classList.remove('btn-secondary');
@@ -203,6 +205,12 @@ async function toggleHighlighting() {
   try {
     const response = await chrome.runtime.sendMessage({ action: 'toggleHighlight' });
 
+    if (!response || typeof response !== 'object') {
+      throw new Error('No response from background (got ' + JSON.stringify(response) + ')');
+    }
+    if (!response.success) {
+      throw new Error(response.error || 'Toggle failed');
+    }
     if (response.success) {
       currentSettings.highlightEnabled = response.enabled;
 
@@ -221,7 +229,8 @@ async function toggleHighlighting() {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs[0]) {
         chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'toggleHighlightNow'
+          action: 'toggleHighlightNow',
+          enabled: response.enabled
         }).catch(() => {
           // Content script might not be loaded
         });
@@ -229,6 +238,42 @@ async function toggleHighlighting() {
     }
   } catch (error) {
     showError('Error toggling highlight: ' + error.message);
+  }
+}
+
+// Subtitle reader (overlay + subtitle browser) toggle
+function renderSubtitleReaderBtn(enabled) {
+  subtitleReaderText.textContent = enabled ? 'Hide Subtitles' : 'Show Subtitles';
+  subtitleReaderBtn.classList.toggle('btn-primary', enabled);
+  subtitleReaderBtn.classList.toggle('btn-secondary', !enabled);
+}
+
+async function loadSubtitleReaderState() {
+  try {
+    const data = await chrome.storage.local.get('settings');
+    renderSubtitleReaderBtn(data.settings?.subtitleReaderEnabled !== false);
+  } catch (error) {
+    renderSubtitleReaderBtn(true);
+  }
+}
+
+async function toggleSubtitleReader() {
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+    const settings = { ...(response.settings || {}) };
+    const enabled = settings.subtitleReaderEnabled === false; // flip
+    settings.subtitleReaderEnabled = enabled;
+
+    // saveSettings stores + broadcasts 'settingsUpdated' to all tabs (live hide/show)
+    const saveResponse = await chrome.runtime.sendMessage({ action: 'saveSettings', settings });
+    if (!saveResponse?.success) {
+      throw new Error(saveResponse?.error || 'Save failed');
+    }
+
+    if (currentSettings) currentSettings.subtitleReaderEnabled = enabled;
+    renderSubtitleReaderBtn(enabled);
+  } catch (error) {
+    showError('Error toggling subtitles: ' + error.message);
   }
 }
 
@@ -416,7 +461,7 @@ async function displayWordReview() {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     // Restore saved state, or default to checked
-    checkbox.checked = savedStates[wordData.word] !== undefined ? savedStates[wordData.word] : true;
+    checkbox.checked = savedStates[wordData.word] !== undefined ? savedStates[wordData.word] : !wordData.likelyName;
     checkbox.dataset.index = index;
     checkbox.dataset.word = wordData.word;
 
@@ -431,7 +476,7 @@ async function displayWordReview() {
 
     const rankSpan = document.createElement('span');
     rankSpan.className = 'word-review-item-rank';
-    rankSpan.textContent = `Rank #${wordData.rank}`;
+    rankSpan.textContent = `Rank #${wordData.rank}` + (wordData.likelyName ? ' · likely a name' : '');
 
     item.appendChild(checkbox);
     item.appendChild(wordSpan);
@@ -720,7 +765,18 @@ function displayResults(data, sessionCost, totalSpend) {
     const sentencesList = document.createElement('ul');
     sentencesList.className = 'result-sentences';
 
-    wordData.sentences.forEach(sentence => {
+    const sentenceItems = [
+      ...wordData.sentences.map(s => ({ sentence: s, extra: null })),
+      ...(wordData.nearMisses || []).map(n => ({ sentence: n.sentence, extra: n.extraUnknown }))
+    ];
+    if (wordData.error) {
+      const errEl = document.createElement('div');
+      errEl.style.cssText = 'color:#f87171;font-size:12.5px;margin:6px 0;';
+      errEl.textContent = 'Generation failed: ' + wordData.error;
+      section.appendChild(errEl);
+    }
+
+    sentenceItems.forEach(({ sentence, extra }) => {
       const li = document.createElement('li');
       li.style.display = 'flex';
       li.style.flexDirection = 'column';
@@ -831,6 +887,14 @@ function displayResults(data, sessionCost, totalSpend) {
       buttonContainer.appendChild(createCardBtn);
 
       li.appendChild(sentenceText);
+      if (extra) {
+        const warn = document.createElement('span');
+        warn.style.cssText = 'font-size:11.5px;color:#f59e0b;';
+        warn.textContent = extra.length
+          ? 'Not verified — also contains: ' + extra.join(', ')
+          : 'Not verified';
+        li.appendChild(warn);
+      }
       li.appendChild(buttonContainer);
       sentencesList.appendChild(li);
     });
@@ -893,9 +957,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 // Event listeners
 toggleBtn.addEventListener('click', toggleHighlighting);
+subtitleReaderBtn.addEventListener('click', toggleSubtitleReader);
+loadSubtitleReaderState();
 refreshBtn.addEventListener('click', refreshWords);
 settingsBtn.addEventListener('click', openSettings);
 coffeeBtn.addEventListener('click', openCoffeePage);
+document.getElementById('report-bug-btn').addEventListener('click', () => window.openBugReport());
 i1GeneratorBtn.addEventListener('click', openI1Generator);
 closeModalBtn.addEventListener('click', closeI1Modal);
 startGenerationBtn.addEventListener('click', startGeneration);

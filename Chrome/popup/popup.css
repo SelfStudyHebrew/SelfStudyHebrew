@@ -167,6 +167,19 @@ h1::after {
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
+.btn-row {
+  display: flex;
+  gap: 5px;
+}
+
+.btn-half {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 7px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .btn {
   padding: 7px 14px;
   border: none;

@@ -13,6 +13,12 @@ let sentenceColor = '#5a7fff';         // Blue for i+1 sentences
 let potentiallyI1Color = '#9b6bff';   // Purple for potentially-i+1 sentences
 let highlightEnabled = true;
 let sentenceHighlightEnabled = true;
+
+// The popup's Disable Highlighting button is a master switch: i+1 sentence
+// highlighting only shows when word highlighting is on AND its own setting is on.
+function sentenceHighlightActive() {
+  return highlightEnabled && sentenceHighlightEnabled;
+}
 let isHighlighted = false;
 let isSentenceHighlighted = false;
 let frequencyData = null; // Hebrew word frequency data
@@ -90,7 +96,7 @@ async function initialize() {
       learningColor = settingsData.settings.learningColor;
       sentenceColor = settingsData.settings.sentenceColor || '#5a7fff';
       potentiallyI1Color = settingsData.settings.potentiallyI1Color || '#9b6bff';
-      highlightEnabled = settingsData.settings.highlightEnabled;
+      highlightEnabled = settingsData.settings.highlightEnabled !== false;
       sentenceHighlightEnabled = settingsData.settings.sentenceHighlightEnabled !== false;
     }
 
@@ -105,7 +111,7 @@ async function initialize() {
       isHighlighted = true;
     }
 
-    if (sentenceHighlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
+    if (sentenceHighlightActive() && (matureWords.length > 0 || learningWords.length > 0)) {
       const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
       pageStats.i1Sentences = i1Count;
       pageStats.potentiallyI1Sentences = potentiallyI1Count;
@@ -148,7 +154,7 @@ async function refreshWords() {
         isHighlighted = true;
       }
 
-      if (sentenceHighlightEnabled && (matureWords.length > 0 || learningWords.length > 0)) {
+      if (sentenceHighlightActive() && (matureWords.length > 0 || learningWords.length > 0)) {
         const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
@@ -167,6 +173,13 @@ async function refreshWords() {
   } catch (error) {
     console.error('[Coordinator] Error refreshing words:', error);
     return false;
+  }
+}
+
+function cancelPendingRehighlight() {
+  if (window.highlightTimeout) {
+    clearTimeout(window.highlightTimeout);
+    window.highlightTimeout = null;
   }
 }
 
@@ -210,10 +223,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         potentiallyI1Color = newSettings.potentiallyI1Color || '#9b6bff';
         const wasEnabled = highlightEnabled;
         const wasSentenceEnabled = sentenceHighlightEnabled;
-        highlightEnabled = newSettings.highlightEnabled;
+        highlightEnabled = newSettings.highlightEnabled !== false;
         sentenceHighlightEnabled = newSettings.sentenceHighlightEnabled !== false;
 
         if (wasEnabled !== highlightEnabled || wasSentenceEnabled !== sentenceHighlightEnabled) {
+          console.log('[SelfStudyHebrew] Highlight setting changed:', { highlightEnabled, sentenceHighlightEnabled });
+          cancelPendingRehighlight();
           needsReload = true;
         }
       }
@@ -236,7 +251,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
         pageStats = { ...pageStats, ...stats };
         isHighlighted = true;
       }
-      if (sentenceHighlightEnabled) {
+      if (sentenceHighlightActive()) {
         const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
         pageStats.i1Sentences = i1Count;
         pageStats.potentiallyI1Sentences = potentiallyI1Count;
@@ -279,7 +294,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
       pageStats = { ...pageStats, ...stats };
       isHighlighted = true;
     }
-    if (sentenceHighlightEnabled) {
+    if (sentenceHighlightActive()) {
       const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
       pageStats.i1Sentences = i1Count;
       pageStats.potentiallyI1Sentences = potentiallyI1Count;
@@ -294,7 +309,40 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request.action === 'toggleHighlightNow') {
-    toggleHighlight();
+    console.log('[SelfStudyHebrew] toggleHighlightNow received:', request.enabled, 'currently highlighted:', isHighlighted);
+    if (typeof request.enabled === 'boolean') {
+      highlightEnabled = request.enabled;
+      if (!request.enabled) {
+        cancelPendingRehighlight();
+        if (isSentenceHighlighted) {
+          window.removeSentenceHighlights();
+          isSentenceHighlighted = false;
+        }
+        if (isHighlighted) {
+          const resetStats = window.removeHighlights();
+          pageStats = { ...pageStats, ...resetStats };
+          isHighlighted = false;
+        }
+      } else if (!isHighlighted) {
+        // Word highlighting must happen FIRST, then sentence highlighting
+        if (isSentenceHighlighted) {
+          window.removeSentenceHighlights();
+          isSentenceHighlighted = false;
+        }
+        const stats = window.highlightWords(matureWords, learningWords, ignoredWords);
+        pageStats = { ...pageStats, ...stats };
+        isHighlighted = true;
+        if (sentenceHighlightActive()) {
+          const {i1Count, potentiallyI1Count} = window.highlightSentences(matureWords, learningWords, sentenceColor, ignoredWords, potentiallyI1Color);
+          pageStats.i1Sentences = i1Count;
+          pageStats.potentiallyI1Sentences = potentiallyI1Count;
+          isSentenceHighlighted = true;
+        }
+        window.addDictionaryHoverListeners(refreshWords);
+      }
+    } else {
+      toggleHighlight();
+    }
     sendResponse({ success: true, isHighlighted: isHighlighted });
   }
 
@@ -383,6 +431,10 @@ const observer = new MutationObserver((mutations) => {
       clearTimeout(window.highlightTimeout);
     }
     window.highlightTimeout = setTimeout(() => {
+      window.highlightTimeout = null;
+      // Highlighting may have been switched off while this re-highlight was pending
+      if (!highlightEnabled || !isHighlighted) return;
+
       // Don't rehighlight if user has text selected (would destroy selection)
       const selection = window.getSelection();
       if (selection && selection.toString().trim().length > 0) {
@@ -397,7 +449,7 @@ const observer = new MutationObserver((mutations) => {
       pageStats = { ...pageStats, ...stats };
       isHighlighted = true;
 
-      if (sentenceHighlightEnabled) {
+      if (sentenceHighlightActive()) {
         if (isSentenceHighlighted) {
           window.removeSentenceHighlights();
         }
@@ -485,7 +537,7 @@ function handleSubtitleUpdate(subtitleElement, platform) {
     subtitleElement.appendChild(fragment);
   }
 
-  if (sentenceHighlightEnabled) {
+  if (sentenceHighlightActive()) {
     const isI1 = window.checkIfI1Sentence(subtitleText, matureWords, learningWords, ignoredWords);
     const isPotentiallyI1 = !isI1 && window.checkIfPotentiallyI1Sentence(subtitleText, matureWords, learningWords, ignoredWords);
 
@@ -630,7 +682,7 @@ if (document.readyState === 'loading') {
         `;
 
         const title = document.createElement('div');
-        title.textContent = `${data.platform} Hebrew Subtitles`;
+        title.textContent = `SelfStudyHebrew · ${data.platform}`;
         title.style.cssText = `
           font-size: 18px;
           font-weight: 600;

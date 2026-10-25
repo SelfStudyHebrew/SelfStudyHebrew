@@ -7,9 +7,10 @@ const DEFAULT_SETTINGS = {
   highlightEnabled: true,
   sentenceHighlightEnabled: true,  // Highlight i+1 sentences
   stripNikudEnabled: false,  // Strip nikud (vowel marks) from Hebrew text
+  subtitleReaderEnabled: true,  // Show subtitle overlay + subtitle browser on video sites
   matureThreshold: 21,  // Days - cards with interval >= this are "mature"
   claudeApiKey: '',  // Claude API key for AI features
-  claudeModel: 'claude-sonnet-4-6',  // Claude model ID for AI features
+  claudeModel: 'auto',  // Claude model ID for AI features ('auto' = newest Sonnet, looked up from Anthropic)
   elevenLabsApiKey: '',  // ElevenLabs API key for TTS audio generation
   elevenLabsVoiceId: 'Jrq4GqCKqYpigdQsZRkP',  // Default voice (Anatole)
   elevenLabsModel: 'eleven_v3',  // ElevenLabs TTS model ID
@@ -22,6 +23,8 @@ const DEFAULT_SETTINGS = {
   cloudflareAccountId: '',  // Cloudflare Account ID for free AI image generation
   cloudflareApiToken: '',  // Cloudflare API Token (Workers AI:Run permission)
   cloudflareImageModel: '@cf/black-forest-labs/flux-1-schnell',  // Cloudflare Workers AI image model
+  pollinationsApiKey: '',  // Pollinations API key for AI image generation (free account)
+  pollinationsImageModel: 'tongyi-mai/z-image-turbo',  // Pollinations image model
 
   maxWordsForI1: 3000,  // Max known words to send for i+1 generation (top frequent + random sampling)
   sentenceGenerationPrompt: `TARGET WORD (unknown to student): {{TARGET_WORD}}
@@ -31,7 +34,7 @@ Generate {{COUNT}} Hebrew sentences for a language learner. Goal: each sentence 
 Rules:
 1. {{TARGET_WORD}} must appear exactly as written — no prefixes, suffixes, or vowel changes
 2. All other words must come from the known words list
-3. Known words MAY take prefixes/prepositions (ל, ב, ו, ש, מ, ה) when grammatically natural
+3. Known words MAY take a single prefix (ו, ל, ב, ש or the definite article ה) when grammatically natural, and may appear in their regular plural or feminine form; every other word form must appear in the known words list exactly as written
 4. Write in modern spoken Israeli Hebrew — conversational register, not formal or literary
 5. Do not include nikud (vowel marks)
 6. Vary the contexts: different speakers, situations, sentence structures
@@ -85,6 +88,18 @@ async function loadFrequencyData() {
     console.error('Error loading frequency data:', error);
     frequencyData = []; // Set to empty array to prevent repeated attempts
   }
+}
+
+// True if the word is just a known word with a common prefix (e.g. הבית when בית is known),
+// so it isn't offered as a new vocabulary target.
+function isPrefixedFormOfKnownWord(word, knownSet) {
+  if (isInflectedFormOfKnown(word, knownSet)) return true;
+  for (const n of [1, 2]) {
+    if (word.length >= n + 3 && [...word.slice(0, n)].every(c => 'הלבמשוכ'.includes(c)) && knownSet.has(word.slice(n))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 async function sampleKnownWords(knownWords, maxWords) {
@@ -682,6 +697,82 @@ async function checkAnkiConnect() {
   }
 }
 
+// ---- Latest-model resolution -------------------------------------------------
+// The Claude model setting defaults to "auto": the newest Sonnet is looked up
+// from Anthropic's models list (cached for 24h) so the default never goes stale.
+const MODEL_CACHE_KEY = 'latestModelCache';
+const MODEL_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const MODEL_RETRY_MS = 10 * 60 * 1000;
+const FALLBACK_MODELS = {
+  sonnet: 'claude-sonnet-4-6',
+  haiku: 'claude-haiku-4-5-20251001'
+};
+const inflightModelLookups = {};
+
+// "auto", empty, and the old hardcoded default all mean "use the newest Sonnet"
+function isAutoModel(model) {
+  const m = (model || '').trim().toLowerCase();
+  return !m || m === 'auto' || m === 'claude-sonnet-4-6';
+}
+
+async function resolveLatestModel(apiKey, family, force = false) {
+  const stored = (await chrome.storage.local.get(MODEL_CACHE_KEY))[MODEL_CACHE_KEY] || {};
+  const entry = stored[family];
+  if (!force && entry && Date.now() - entry.ts < MODEL_CACHE_TTL_MS) return entry.id;
+  if (inflightModelLookups[family]) return inflightModelLookups[family];
+
+  inflightModelLookups[family] = (async () => {
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/models?limit=1000', {
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        }
+      });
+      if (!res.ok) throw new Error(`models list HTTP ${res.status}`);
+      const json = await res.json();
+      const matches = (json.data || [])
+        .filter(m => typeof m.id === 'string' && m.id.startsWith('claude-') && m.id.includes(family))
+        .sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
+      if (!matches.length) throw new Error(`no ${family} model in models list`);
+      const id = matches[0].id;
+      stored[family] = { id, ts: Date.now() };
+      await chrome.storage.local.set({ [MODEL_CACHE_KEY]: stored });
+      return id;
+    } catch (error) {
+      console.warn('Could not resolve latest Claude model, using fallback:', error.message);
+      if (force) throw error;
+      const id = entry?.id || FALLBACK_MODELS[family];
+      // Keep whatever we had, but retry the lookup in 10 minutes rather than on every call
+      stored[family] = { id, ts: Date.now() - MODEL_CACHE_TTL_MS + MODEL_RETRY_MS, fallback: true };
+      await chrome.storage.local.set({ [MODEL_CACHE_KEY]: stored }).catch(() => {});
+      return id;
+    } finally {
+      delete inflightModelLookups[family];
+    }
+  })();
+  return inflightModelLookups[family];
+}
+
+// Pull the reply text out of a Claude response. Newer models can return other block types
+// (e.g. "thinking") before the text, so don't assume content[0] is the text.
+function extractClaudeText(data) {
+  const blocks = Array.isArray(data && data.content) ? data.content : [];
+  const text = blocks
+    .filter(b => b && b.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text)
+    .join('');
+  if (!text.trim()) {
+    const types = blocks.map(b => b && b.type).join(', ') || 'none';
+    throw new Error(`Claude returned no text (stop reason: ${(data && data.stop_reason) || 'unknown'}; content: ${types})`);
+  }
+  return text;
+}
+
+const THINKING_MODE_CACHE_KEY = 'thinkingModeCache';
+const THINKING_MODES = [{ type: 'between_tools' }, { type: 'disabled' }, null];
+
 async function callClaudeAPI(apiKey, prompt, options = {}) {
   let messages;
   if (typeof prompt === 'string') {
@@ -699,8 +790,11 @@ async function callClaudeAPI(apiKey, prompt, options = {}) {
     throw new Error('Invalid prompt type');
   }
 
+  let model = options.model || DEFAULT_SETTINGS.claudeModel;
+  if (isAutoModel(model)) model = await resolveLatestModel(apiKey, 'sonnet');
+
   const requestBody = {
-    model: options.model || DEFAULT_SETTINGS.claudeModel,
+    model,
     max_tokens: options.max_tokens || 1024,
     messages: messages
   };
@@ -709,24 +803,51 @@ async function callClaudeAPI(apiKey, prompt, options = {}) {
     requestBody.system = options.system;
   }
 
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify(requestBody)
-  });
+  // Newer models think by default, and the setting that turns it off differs by model
+  // ("between_tools" on Sonnet 5.5, "disabled" on Sonnet 5, no setting on older models).
+  // Try each in turn, and remember which one the model accepts.
+  const cacheData = await chrome.storage.local.get(THINKING_MODE_CACHE_KEY);
+  const thinkingCache = cacheData[THINKING_MODE_CACHE_KEY] || {};
+  const modes = options.allowThinking ? [null] : THINKING_MODES;
+  let modeIndex = !options.allowThinking && Number.isInteger(thinkingCache[model]) ? thinkingCache[model] : 0;
+  let response;
 
-  if (!response.ok) {
+  for (; modeIndex < modes.length; modeIndex++) {
+    const thinking = modes[modeIndex];
+    const body = { ...requestBody };
+    if (thinking) {
+      body.thinking = thinking;
+    } else {
+      // No way to switch thinking off here, so leave room for it plus the answer
+      body.max_tokens = Math.max(body.max_tokens, 4096);
+    }
+
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify(body)
+    });
+    if (response.ok) break;
+
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+    const message = errorData.error?.message || `HTTP error! status: ${response.status}`;
+    const isThinkingRejection = response.status === 400 && /thinking/i.test(message);
+    if (isThinkingRejection && modeIndex < modes.length - 1) continue;
+    throw new Error(message);
+  }
+
+  if (!options.allowThinking && thinkingCache[model] !== modeIndex) {
+    thinkingCache[model] = modeIndex;
+    await chrome.storage.local.set({ [THINKING_MODE_CACHE_KEY]: thinkingCache }).catch(() => {});
   }
 
   const data = await response.json();
-  return { text: data.content[0].text, usage: data.usage || {} };
+  return { text: extractClaudeText(data), usage: data.usage || {} };
 }
 
 // Add cost to the running total and per-type breakdown in storage
@@ -874,8 +995,93 @@ async function defineWords(sentence, unknownWords, apiKey, model, customPrompt, 
   return { text: combinedText, cost: totalCost };
 }
 
+// ---- i+1 sentence validation -------------------------------------------------
+// Generated sentences are checked with the same known-word rules the highlighter uses
+// (known word, or known word with a single ו / ל / ב / ש prefix), so a sentence only
+// counts as i+1 if it really has one unknown word: the target.
+const I1_MAX_ATTEMPTS = 3;
+const I1_STRICT_NOTE = `
+
+STRICT KNOWN-WORD CHECK (overrides any earlier rule about prefixes): every word other than {{TARGET_WORD}} must appear in the KNOWN WORDS list exactly as written. The only changes allowed are adding a single ו, ל, ב, ש or ה (the definite article) prefix to a listed word, or using its regular plural or feminine form. If a natural sentence is not possible with the listed words, use simpler wording instead of an unlisted word.
+
+MEANING AND REGISTER: use the most common everyday meaning of {{TARGET_WORD}} (not a proper name or a rare sense unless that is its main use). If {{TARGET_WORD}} is a formal or written-register word, a slightly formal sentence is fine rather than forcing casual speech. Make each sentence about a different situation or topic.`;
+
+function i1Normalize(word) {
+  return word.replace(/[֑-ׇ]/g, '');
+}
+
+// Plural / feminine forms of a known word (בנים, שפות, מורה -> מורות, חבר -> חברה ...)
+function isInflectedFormOfKnown(word, knownSet) {
+  const tryBase = (base, minLen) => base.length >= minLen && knownSet.has(base);
+  for (const suffix of ['ים', 'ות']) {
+    if (word.endsWith(suffix)) {
+      const base = word.slice(0, -suffix.length);
+      if (tryBase(base, 2)) return true;
+      if (tryBase(base + 'ה', 3)) return true;   // שפה -> שפות
+      if (tryBase(base + 'ת', 3)) return true;   // אחת -> אחיות style endings
+    }
+  }
+  for (const suffix of ['ה', 'ת']) {
+    if (word.endsWith(suffix) && tryBase(word.slice(0, -1), 3)) return true;  // חבר -> חברה / חברת
+  }
+  return false;
+}
+
+function findUnknownWordsInSentence(sentence, targetWord, knownSet) {
+  const tokens = (sentence.match(/[֐-׿]+/g) || []).map(i1Normalize).filter(w => w.length > 1);
+  const hasTarget = tokens.includes(targetWord);
+  const extra = [];
+  for (const w of tokens) {
+    if (w === targetWord || knownSet.has(w) || extra.includes(w)) continue;
+    if (w.length > 2 && 'ולבשה'.includes(w[0]) && knownSet.has(w.slice(1))) continue;
+    if (w.length > 3 && 'ושו'.includes(w[0]) && w[1] === 'ה' && knownSet.has(w.slice(2))) continue;  // והבית, שהבית
+    if (isInflectedFormOfKnown(w, knownSet)) continue;
+    if (w.length > 3 && 'ולבשה'.includes(w[0]) && isInflectedFormOfKnown(w.slice(1), knownSet)) continue;
+    extra.push(w);
+  }
+  return { hasTarget, extra };
+}
+
+function addUsage(total, usage) {
+  for (const [key, value] of Object.entries(usage || {})) {
+    if (typeof value === 'number') total[key] = (total[key] || 0) + value;
+  }
+}
+
+// Ask Claude which words are mostly used as names (so they can be unticked by default)
+async function flagLikelyNames(words, apiKey) {
+  try {
+    const model = await resolveLatestModel(apiKey, 'haiku');
+    const prompt = `Here is a list of Hebrew words from a word-frequency list: ${words.join(', ')}\n\nWhich of them are used mainly as a person's or place's name in modern Hebrew text, rather than as an ordinary word? (For example אלי is mostly the name Eli.) Reply with only a JSON array of those words, or [] if none.`;
+    const { text } = await callClaudeAPI(apiKey, prompt, { model, max_tokens: 512 });
+    const match = text.match(/\[[^\]]*\]/);
+    if (!match) return new Set();
+    const list = JSON.parse(match[0]);
+    return new Set(list.filter(w => typeof w === 'string' && words.includes(w)));
+  } catch (error) {
+    console.warn('Name check failed:', error.message);
+    return new Set();
+  }
+}
+
+// One extra check: which of these sentences have a grammar or meaning error? Returns indexes to drop.
+async function findGrammarErrors(sentences, apiKey, model) {
+  try {
+    const numbered = sentences.map((s, i) => `${i + 1}. ${s}`).join('\n');
+    const prompt = `You are a careful Hebrew proofreader. Check each sentence for grammar mistakes: gender or number agreement (especially adjectives after plural nouns), definiteness (e.g. "כלי הזה" should be "הכלי הזה"), wrong construct forms, wrong verb forms, unnatural wording a native speaker would not say, and sentences whose meaning is illogical, contradictory or odd (for example "the more I eat, the hungrier I am").\n\n${numbered}\n\nReply with only a JSON array of the numbers of sentences that contain a mistake, or [] if all are correct.`;
+    const { text, usage } = await callClaudeAPI(apiKey, prompt, { model, max_tokens: 4096, allowThinking: true });
+    const match = text.match(/\[[\d,\s]*\]/);
+    const bad = match ? JSON.parse(match[0]).map(n => n - 1).filter(i => i >= 0 && i < sentences.length) : [];
+    return { bad: new Set(bad), usage };
+  } catch (error) {
+    console.warn('Grammar check failed:', error.message);
+    return { bad: new Set(), usage: {} };
+  }
+}
+
 async function generateI1SentencesForWord(targetWord, knownWords, count, apiKey, maxWords = 3000, model, customPrompt) {
   const sampledWords = await sampleKnownWords(knownWords, maxWords);
+  const knownSet = new Set(knownWords.map(i1Normalize));
 
   const systemMessage = [
     {
@@ -890,22 +1096,93 @@ async function generateI1SentencesForWord(targetWord, knownWords, count, apiKey,
   ];
 
   const promptTemplate = customPrompt || DEFAULT_SETTINGS.sentenceGenerationPrompt;
-  const userPrompt = promptTemplate
-    .replace(/\{\{TARGET_WORD\}\}/g, targetWord)
-    .replace(/\{\{COUNT\}\}/g, count);
+  const strictNote = I1_STRICT_NOTE.replace(/\{\{TARGET_WORD\}\}/g, targetWord);
 
-  const { text, usage } = await callClaudeAPI(apiKey, userPrompt, { system: systemMessage, model });
+  const accepted = [];
+  const nearMisses = [];
+  const avoid = new Set();
+  const totalUsage = {};
+  let totalCost = 0;
+  let attempts = 0;
 
-  const sentences = text
-    .split('\n')
-    .map(s => s.trim())
-    .filter(s => s.length > 0 && !s.match(/^\d+[\.\)]/))
-    .map(s => s.replace(/^[\d\.\)\-\s]+/, ''))
-    .filter(s => s.length > 0)
-    .slice(0, count);
+  while (accepted.length < count && attempts < I1_MAX_ATTEMPTS) {
+    attempts++;
+    const ask = attempts === 1 ? count : Math.min((count - accepted.length) * 2, 10);
 
-  const cost = calculateClaudeCost(usage, model);
-  return { sentences, cost, usage };
+    let userPrompt = promptTemplate
+      .replace(/\{\{TARGET_WORD\}\}/g, targetWord)
+      .replace(/\{\{COUNT\}\}/g, ask) + strictNote;
+    if (avoid.size) {
+      userPrompt += `\n\nThese words are NOT known to the student, so do not use them or other forms of them: ${[...avoid].slice(0, 40).join(', ')}.`;
+    }
+    if (accepted.length) {
+      userPrompt += `\n\nDo not repeat these sentences:\n${accepted.join('\n')}`;
+    }
+
+    const { text, usage } = await callClaudeAPI(apiKey, userPrompt, { system: systemMessage, model });
+    totalCost += calculateClaudeCost(usage, model);
+    addUsage(totalUsage, usage);
+
+    const parsed = text
+      .split('\n')
+      .map(s => s.trim())
+      .map(s => s.replace(/^(?:[*•·\-–—]+|\d+[\.\)])\s*/, '').trim())
+      .filter(s => /[\u0590-\u05FF]/.test(s))
+      .slice(0, ask);
+
+    const passed = [];
+    const failed = [];
+    for (const sentence of parsed) {
+      if (accepted.includes(sentence)) continue;
+      const { hasTarget, extra } = findUnknownWordsInSentence(sentence, targetWord, knownSet);
+      if (hasTarget && extra.length === 0) {
+        passed.push(sentence);
+      } else {
+        failed.push({ sentence, hasTarget, extra });
+      }
+    }
+
+    // Grammar check on the sentences that passed the known-word check
+    if (passed.length) {
+      const checkModel = isAutoModel(model || DEFAULT_SETTINGS.claudeModel)
+        ? await resolveLatestModel(apiKey, 'sonnet')
+        : (model || DEFAULT_SETTINGS.claudeModel);
+      const { bad, usage: checkUsage } = await findGrammarErrors(passed, apiKey, checkModel);
+      totalCost += calculateClaudeCost(checkUsage, checkModel);
+      addUsage(totalUsage, checkUsage);
+      passed.forEach((sentence, i) => { if (!bad.has(i)) accepted.push(sentence); });
+      if (bad.size) console.log(`[i+1] ${targetWord}: dropped ${bad.size} sentence(s) for grammar`);
+    }
+
+    for (const { sentence, hasTarget, extra } of failed) {
+      {
+        nearMisses.push({ sentence, extraUnknown: extra, hasTarget });
+        if (hasTarget) extra.forEach(w => avoid.add(w));
+      }
+    }
+  }
+
+  const sentences = accepted.slice(0, count);
+  // If not enough sentences passed the check, top up with the closest misses and flag them
+  const topUp = sentences.length >= count ? [] : nearMisses
+    .filter(n => n.hasTarget)
+    .sort((a, b) => a.extraUnknown.length - b.extraUnknown.length)
+    .slice(0, count - sentences.length)
+    .map(n => ({ sentence: n.sentence, extraUnknown: n.extraUnknown }));
+
+  // Unverified top-up sentences get the same grammar check
+  if (topUp.length) {
+    const checkModel = isAutoModel(model || DEFAULT_SETTINGS.claudeModel)
+      ? await resolveLatestModel(apiKey, 'sonnet')
+      : (model || DEFAULT_SETTINGS.claudeModel);
+    const { bad, usage: checkUsage } = await findGrammarErrors(topUp.map(n => n.sentence), apiKey, checkModel);
+    totalCost += calculateClaudeCost(checkUsage, checkModel);
+    addUsage(totalUsage, checkUsage);
+    for (let i = topUp.length - 1; i >= 0; i--) if (bad.has(i)) topUp.splice(i, 1);
+  }
+
+  console.log(`[i+1] ${targetWord}: ${sentences.length}/${count} verified after ${attempts} attempt(s), ${topUp.length} unverified`);
+  return { sentences, nearMisses: topUp, cost: totalCost, usage: totalUsage, attempts };
 }
 
 // Dictionary lookup function
@@ -1141,22 +1418,22 @@ const MESSAGE_HANDLERS = {
     return true;
   },
 
-  toggleHighlight: async (request, sender, sendResponse) => {
-    try {
-      const data = await chrome.storage.local.get('settings');
-      const settings = data.settings || DEFAULT_SETTINGS;
-      settings.highlightEnabled = !settings.highlightEnabled;
-      await chrome.storage.local.set({ settings });
-
-      const updatedData = await chrome.storage.local.get('settings');
-      sendResponse({
-        success: true,
-        enabled: updatedData.settings.highlightEnabled
-      });
-    } catch (error) {
-      sendResponse({ success: false, error: error.message });
-    }
-    return true;
+  // NOT an async function: an async handler returns a Promise, and current Chrome/Firefox
+  // use a returned Promise's value (`true`) as the response instead of the sendResponse object,
+  // so the popup never saw { success, enabled } and its button label never updated.
+  toggleHighlight: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get('settings');
+        const settings = data.settings || { ...DEFAULT_SETTINGS };
+        settings.highlightEnabled = settings.highlightEnabled === false; // flip (undefined counts as on)
+        await chrome.storage.local.set({ settings });
+        sendResponse({ success: true, enabled: settings.highlightEnabled });
+      } catch (error) {
+        sendResponse({ success: false, error: error.message });
+      }
+    })();
+    return true; // keep the message channel open for sendResponse
   },
 
   getDecks: (request, sender, sendResponse) => {
@@ -1551,7 +1828,7 @@ const MESSAGE_HANDLERS = {
           const word = frequencyData[i];
           const normalizedWord = word.replace(/[\u0591-\u05C7]/g, '');
 
-          if (!allAnkiWords.has(normalizedWord) && normalizedWord.length > 1) {
+          if (!allAnkiWords.has(normalizedWord) && normalizedWord.length > 1 && !isPrefixedFormOfKnownWord(normalizedWord, allAnkiWords)) {
             unknownWords.push({
               word: normalizedWord,
               rank: i + 1
@@ -1562,6 +1839,12 @@ const MESSAGE_HANDLERS = {
         if (unknownWords.length === 0) {
           sendResponse({ success: false, error: `No unknown words found in frequency list. You have ${allAnkiWords.size} words in Anki already!` });
           return;
+        }
+
+        const claudeKey = settings.claudeApiKey;
+        if (claudeKey) {
+          const names = await flagLikelyNames(unknownWords.map(w => w.word), claudeKey);
+          unknownWords.forEach(w => { if (names.has(w.word)) w.likelyName = true; });
         }
 
         sendResponse({ success: true, unknownWords: unknownWords });
@@ -1614,13 +1897,15 @@ const MESSAGE_HANDLERS = {
           });
 
           try {
-            const { sentences, cost, usage } = await generateI1SentencesForWord(wordData.word, knownWords, sentencesPerWord, apiKey, maxWords, claudeModel, customPrompt);
+            const { sentences, nearMisses, attempts, cost, usage } = await generateI1SentencesForWord(wordData.word, knownWords, sentencesPerWord, apiKey, maxWords, claudeModel, customPrompt);
             sessionCost += cost;
 
             results.push({
               word: wordData.word,
               rank: wordData.rank,
               sentences,
+              nearMisses,
+              attempts,
               cost,
               usage
             });
@@ -1769,6 +2054,27 @@ const MESSAGE_HANDLERS = {
     return true;
   },
 
+  getLatestClaudeModel: (request, sender, sendResponse) => {
+    (async () => {
+      let cached = null;
+      try {
+        const data = await chrome.storage.local.get(['settings', MODEL_CACHE_KEY]);
+        cached = data[MODEL_CACHE_KEY]?.sonnet || null;
+        if (request.refresh) {
+          const apiKey = (request.apiKey || data.settings?.claudeApiKey || '').trim();
+          if (!apiKey) throw new Error('Enter your Claude API key first');
+          const id = await resolveLatestModel(apiKey, 'sonnet', true);
+          sendResponse({ success: true, model: id, checkedAt: Date.now() });
+        } else {
+          sendResponse({ success: true, model: cached?.id || null, checkedAt: cached?.ts || null, fallback: !!cached?.fallback });
+        }
+      } catch (error) {
+        sendResponse({ success: false, error: error.message, model: cached?.id || FALLBACK_MODELS.sonnet });
+      }
+    })();
+    return true;
+  },
+
   generateGeminiImage: (request, sender, sendResponse) => {
     (async () => {
       try {
@@ -1786,7 +2092,7 @@ const MESSAGE_HANDLERS = {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'gemini-3.1-flash-image',
+            model: 'gemini-nano-banana-2.1',
             input: [{ type: 'text', text: request.prompt }]
           })
         });
@@ -1832,6 +2138,48 @@ const MESSAGE_HANDLERS = {
     return true;
   },
 
+  generatePollinationsImage: (request, sender, sendResponse) => {
+    (async () => {
+      try {
+        const data = await chrome.storage.local.get('settings');
+        const apiKey = data.settings?.pollinationsApiKey?.trim();
+        if (!apiKey) {
+          sendResponse({ success: false, error: 'Pollinations API key not configured in Settings' });
+          return;
+        }
+        const model = data.settings?.pollinationsImageModel?.trim() || 'tongyi-mai/z-image-turbo';
+        const prompt = String(request.prompt || '').slice(0, 1500);
+        const url = `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?model=${encodeURIComponent(model)}&width=768&height=768&nologo=true`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 90000);
+        let response;
+        try {
+          response = await fetch(url, { headers: { 'Authorization': `Bearer ${apiKey}` }, signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+        if (!response.ok) {
+          const errText = await response.text();
+          let msg = errText.slice(0, 300);
+          try { msg = JSON.parse(errText).error?.message || msg; } catch (e) { /* keep raw text */ }
+          throw new Error(`Pollinations ${response.status}: ${msg}`);
+        }
+        const mimeType = (response.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
+        if (!mimeType.startsWith('image/')) throw new Error('Pollinations returned a non-image response');
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        const imageBase64 = btoa(binary);
+        const ext = mimeType.includes('png') ? 'png' : mimeType.includes('webp') ? 'webp' : 'jpg';
+        const filename = `ssh_pollinations_${Date.now()}.${ext}`;
+        sendResponse({ success: true, filename, imageBase64, mimeType, dataUrl: `data:${mimeType};base64,${imageBase64}` });
+      } catch (error) {
+        sendResponse({ success: false, error: error.name === 'AbortError' ? 'Pollinations timed out after 90s — try again' : error.message });
+      }
+    })();
+    return true;
+  },
+
   translateSubtitles: (request, sender, sendResponse) => {
     (async () => {
       try {
@@ -1851,7 +2199,7 @@ const MESSAGE_HANDLERS = {
             'content-type': 'application/json'
           },
           body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
+            model: await resolveLatestModel(apiKey, 'haiku'),
             max_tokens: 8192,
             messages: [{ role: 'user', content: prompt }]
           })
@@ -1861,7 +2209,7 @@ const MESSAGE_HANDLERS = {
           throw new Error(`Claude API ${response.status}: ${err.slice(0, 200)}`);
         }
         const json = await response.json();
-        const text = json.content[0].text.trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+        const text = extractClaudeText(json).trim().replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
         const translations = JSON.parse(text);
         if (!Array.isArray(translations)) throw new Error('Unexpected response format');
         sendResponse({ success: true, translations });

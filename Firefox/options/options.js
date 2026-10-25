@@ -58,6 +58,8 @@ const geminiApiKeyInput = document.getElementById('gemini-api-key');
 const cloudflareAccountIdInput = document.getElementById('cloudflare-account-id');
 const cloudflareApiTokenInput = document.getElementById('cloudflare-api-token');
 const cloudflareImageModelInput = document.getElementById('cloudflare-image-model');
+const pollinationsApiKeyInput = document.getElementById('pollinations-api-key');
+const pollinationsImageModelInput = document.getElementById('pollinations-image-model');
 const maxWordsI1Input = document.getElementById('max-words-i1');
 const sentenceGenerationPromptInput = document.getElementById('sentence-generation-prompt');
 const resetPromptBtn = document.getElementById('reset-prompt-btn');
@@ -80,6 +82,7 @@ const potentiallyI1ColorText = document.getElementById('potentially-i1-color-tex
 const resetPotentiallyI1ColorBtn = document.getElementById('reset-potentially-i1-color-btn');
 const sentenceHighlightEnabled = document.getElementById('sentence-highlight-enabled');
 const stripNikudEnabled = document.getElementById('strip-nikud-enabled');
+const subtitleReaderEnabled = document.getElementById('subtitle-reader-enabled');
 const fieldNameInput = document.getElementById('field-name');
 const deckFilterInput = document.getElementById('deck-filter');
 const matureThresholdInput = document.getElementById('mature-threshold');
@@ -275,7 +278,8 @@ async function loadSettings() {
 
     if (settings) {
       claudeApiKeyInput.value = settings.claudeApiKey || '';
-      claudeModelInput.value = settings.claudeModel || 'claude-sonnet-4-6';
+      claudeModelInput.value = (!settings.claudeModel || settings.claudeModel === 'claude-sonnet-4-6') ? 'auto' : settings.claudeModel;
+      updateClaudeModelStatus();
       elevenLabsApiKeyInput.value = settings.elevenLabsApiKey || '';
       elevenLabsVoiceIdInput.value = settings.elevenLabsVoiceId || 'Jrq4GqCKqYpigdQsZRkP';
       elevenLabsModelInput.value = settings.elevenLabsModel || 'eleven_v3';
@@ -283,6 +287,8 @@ async function loadSettings() {
       cloudflareAccountIdInput.value = settings.cloudflareAccountId || '';
       cloudflareApiTokenInput.value = settings.cloudflareApiToken || '';
       cloudflareImageModelInput.value = settings.cloudflareImageModel || '';
+      pollinationsApiKeyInput.value = settings.pollinationsApiKey || '';
+      pollinationsImageModelInput.value = settings.pollinationsImageModel || 'tongyi-mai/z-image-turbo';
       maxWordsI1Input.value = settings.maxWordsForI1 || 3000;
       sentenceGenerationPromptInput.value = settings.sentenceGenerationPrompt || DEFAULT_SENTENCE_PROMPT;
       aiDefinePromptInput.value = settings.aiDefinePrompt || DEFAULT_DEFINE_PROMPT;
@@ -293,6 +299,7 @@ async function loadSettings() {
       potentiallyI1ColorText.value = settings.potentiallyI1Color || '#9b6bff';
       sentenceHighlightEnabled.checked = settings.sentenceHighlightEnabled !== false;
       stripNikudEnabled.checked = settings.stripNikudEnabled || false;
+      subtitleReaderEnabled.checked = settings.subtitleReaderEnabled !== false;
       audioFieldNameInput.value = settings.audioFieldName || 'Audio';
       imageFieldNameInput.value = settings.imageFieldName || 'Image';
       meaningFieldNameInput.value = settings.meaningFieldName || 'English';
@@ -401,7 +408,7 @@ async function saveSettings() {
     const oldThreshold = settings.matureThreshold;
 
     settings.claudeApiKey = claudeApiKeyInput.value.trim();
-    settings.claudeModel = claudeModelInput.value.trim() || 'claude-sonnet-4-6';
+    settings.claudeModel = claudeModelInput.value.trim() || 'auto';
     settings.elevenLabsApiKey = elevenLabsApiKeyInput.value.trim();
     settings.elevenLabsVoiceId = elevenLabsVoiceIdInput.value.trim() || 'Jrq4GqCKqYpigdQsZRkP';
     settings.elevenLabsModel = elevenLabsModelInput.value.trim() || 'eleven_v3';
@@ -409,6 +416,8 @@ async function saveSettings() {
     settings.cloudflareAccountId = cloudflareAccountIdInput.value.trim();
     settings.cloudflareApiToken = cloudflareApiTokenInput.value.trim();
     settings.cloudflareImageModel = cloudflareImageModelInput.value.trim();
+    settings.pollinationsApiKey = pollinationsApiKeyInput.value.trim();
+    settings.pollinationsImageModel = pollinationsImageModelInput.value || 'tongyi-mai/z-image-turbo';
     settings.maxWordsForI1 = parseInt(maxWordsI1Input.value) || 3000;
     settings.sentenceGenerationPrompt = sentenceGenerationPromptInput.value.trim() || DEFAULT_SENTENCE_PROMPT;
     settings.aiDefinePrompt = aiDefinePromptInput.value.trim() || DEFAULT_DEFINE_PROMPT;
@@ -422,6 +431,7 @@ async function saveSettings() {
     settings.potentiallyI1Color = potentiallyI1ColorText.value;
     settings.sentenceHighlightEnabled = sentenceHighlightEnabled.checked;
     settings.stripNikudEnabled = stripNikudEnabled.checked;
+    settings.subtitleReaderEnabled = subtitleReaderEnabled.checked;
     settings.fieldName = fieldName;
     settings.deckFilter = deckFilterInput.value.trim();
     settings.matureThreshold = parseInt(matureThresholdInput.value) || 21;
@@ -941,7 +951,47 @@ async function loadElevenLabsUsage() {
 
 refreshElevenLabsBtn.addEventListener('click', loadElevenLabsUsage);
 
+// Shows what "auto" currently resolves to (or what the model is pinned to)
+const claudeModelStatus = document.getElementById('claude-model-status');
+const checkClaudeModelBtn = document.getElementById('check-claude-model-btn');
+let claudeModelStatusBusy = false;
+
+async function updateClaudeModelStatus(refresh = false) {
+  if (claudeModelStatusBusy) return;
+  const typed = claudeModelInput.value.trim();
+  if (typed && typed.toLowerCase() !== 'auto') {
+    claudeModelStatus.textContent = `Pinned to ${typed}. Auto-updating is off — type "auto" to turn it back on.`;
+    return;
+  }
+  claudeModelStatusBusy = true;
+  const intro = 'Auto = the newest Claude Sonnet.';
+  try {
+    let resp = await chrome.runtime.sendMessage({ action: 'getLatestClaudeModel', refresh, apiKey: claudeApiKeyInput.value.trim() });
+    if (!refresh && !resp?.model && claudeApiKeyInput.value.trim()) {
+      resp = await chrome.runtime.sendMessage({ action: 'getLatestClaudeModel', refresh: true, apiKey: claudeApiKeyInput.value.trim() });
+    }
+    if (resp?.success && resp.model) {
+      const when = resp.checkedAt && !resp.fallback ? ` (checked ${new Date(resp.checkedAt).toLocaleString()})` : '';
+      const note = resp.fallback ? ' — could not reach Anthropic, using this fallback until the next check' : '';
+      claudeModelStatus.textContent = `${intro} Currently: ${resp.model}${when}${note}`;
+    } else if (resp?.success) {
+      claudeModelStatus.textContent = `${intro} Not looked up yet — add your API key and click Check now.`;
+    } else {
+      claudeModelStatus.textContent = `${intro} Could not check (${resp?.error || 'unknown error'}). Using ${resp?.model || 'claude-sonnet-4-6'} for now.`;
+    }
+  } catch (error) {
+    claudeModelStatus.textContent = `${intro} Could not check (${error.message}).`;
+  } finally {
+    claudeModelStatusBusy = false;
+  }
+}
+checkClaudeModelBtn.addEventListener('click', () => updateClaudeModelStatus(true));
+claudeModelInput.addEventListener('input', () => updateClaudeModelStatus(false));
+
 // Load settings on page load
 loadSettings();
 loadSpendTotal();
 loadElevenLabsUsage();
+
+// Bug report button
+document.getElementById('report-bug-btn')?.addEventListener('click', () => window.openBugReport());

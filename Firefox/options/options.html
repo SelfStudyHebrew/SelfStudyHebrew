@@ -10,6 +10,7 @@
   <div class="container">
     <header>
       <h1>SelfStudyHebrew Settings</h1>
+      <button type="button" id="report-bug-btn" style="font-size:12px;padding:4px 10px;margin-top:8px;" title="Report a bug — no account needed">Report a Bug</button>
     </header>
 
     <div class="info-section" style="margin-bottom: 20px;">
@@ -43,8 +44,12 @@
 
       <div class="setting-item">
         <label for="claude-model">Claude Model</label>
-        <input type="text" id="claude-model" value="claude-sonnet-4-6" placeholder="claude-sonnet-4-6">
-        <p class="description">Claude model ID to use for translations and definitions. See available model IDs at <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank">platform.claude.com/docs/en/about-claude/models/overview</a></p>
+        <input type="text" id="claude-model" value="auto" placeholder="auto">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:6px 0;">
+          <span id="claude-model-status" class="description" style="margin:0;"></span>
+          <button type="button" id="check-claude-model-btn" style="font-size:12px;padding:4px 10px;">Check now</button>
+        </div>
+        <p class="description">Leave as <code>auto</code> to always use the newest Claude Sonnet (looked up from Anthropic and checked once a day, so it stays current as new models are released). Or enter a specific model ID to pin one. See available model IDs at <a href="https://platform.claude.com/docs/en/about-claude/models/overview" target="_blank">platform.claude.com/docs/en/about-claude/models/overview</a></p>
         <p class="description" style="font-weight: 600; color: #ff8c00;">⚠️ Strongly recommended: Set API spend limits at <a href="https://console.anthropic.com/settings/limits" target="_blank">console.anthropic.com/settings/limits</a> and ensure "Auto reload credits" is disabled at <a href="https://console.anthropic.com/settings/billing" target="_blank">console.anthropic.com/settings/billing</a> to avoid unexpected charges.</p>
       </div>
 
@@ -101,6 +106,22 @@
         <label for="cloudflare-image-model">Cloudflare Image Model</label>
         <input type="text" id="cloudflare-image-model" value="" placeholder="@cf/black-forest-labs/flux-1-schnell">
         <p class="description">Workers AI model for image generation. Leave blank to use the default. Free models (Cloudflare-hosted): <code>@cf/black-forest-labs/flux-1-schnell</code> (default, fast), <code>@cf/bytedance/stable-diffusion-xl-lightning</code>, <code>@cf/lykon/dreamshaper-8-lcm</code>, <code>@cf/stabilityai/stable-diffusion-xl-base-1.0</code>. Partner-tagged models may incur extra charges. <a href="https://developers.cloudflare.com/workers-ai/models/?tasks=Text-to-Image" target="_blank">Browse all models</a>.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="pollinations-api-key">Pollinations API Key (Image Generation — Free account)</label>
+        <input type="password" id="pollinations-api-key" value="" placeholder="sk_...">
+        <p class="description">Free key from <a href="https://enter.pollinations.ai/" target="_blank">enter.pollinations.ai</a>. Gives clean, watermark-free images from several models. Usage is metered in "pollen" credits, so cheaper models go further.</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="pollinations-image-model">Pollinations Image Model</label>
+        <select id="pollinations-image-model">
+          <option value="tongyi-mai/z-image-turbo">Z-Image Turbo (default — cheapest, fast)</option>
+          <option value="black-forest-labs/flux.2-klein-4b">FLUX.2 Klein 4B (balanced)</option>
+          <option value="black-forest-labs/flux.1.1-pro">FLUX 1.1 Pro (best quality, ~7x cost of Z-Image)</option>
+          <option value="openai/gpt-image-1-mini">GPT Image 1 Mini (slower, ~20s)</option>
+        </select>
       </div>
 
       <div class="setting-item">
@@ -206,6 +227,14 @@
           Strip Nikud (Vowel Marks)
         </label>
         <p class="description">Remove nikud (vowel marks) from Hebrew text in subtitles and overlays for reading practice</p>
+      </div>
+
+      <div class="setting-item">
+        <label for="subtitle-reader-enabled">
+          <input type="checkbox" id="subtitle-reader-enabled" checked>
+          Enable Subtitle Reader (Overlay + Subtitle Browser)
+        </label>
+        <p class="description">Show the Hebrew subtitle overlay and subtitle browser sidebar on YouTube, Netflix and StreamIsrael. Changes apply immediately. Also available as the Hide/Show Subtitles button in the toolbar popup.</p>
       </div>
 
       <div class="setting-item">
@@ -365,6 +394,7 @@
     </div>
   </div>
 
+  <script src="../src/utils/bug-report.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

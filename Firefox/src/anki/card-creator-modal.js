@@ -128,6 +128,116 @@ async function handleTranslate(button) {
 }
 
 /**
+ * Non-AI dictionary lookup for a single Hebrew word.
+ * Reuses the same background fetchers as the dictionary popup.
+ * @param {'reverso'|'pealim'|'google'} source
+ * @param {string} word
+ * @returns {Promise<string>} Short English meaning
+ */
+async function fetchDictionaryMeaning(source, word) {
+  if (source === 'google' || source === 'reverso') {
+    const resp = await chrome.runtime.sendMessage({
+      action: source === 'google' ? 'fetchGoogleTranslate' : 'fetchReversoAPI',
+      word
+    });
+    const text = (resp && resp.success && resp.translation || '').trim();
+    if (!text) throw new Error((resp && resp.error) || 'No result');
+    return text;
+  }
+
+  // Pealim: parse the lemma-level entries (meaning + part of speech) from the search page
+  const resp = await chrome.runtime.sendMessage({
+    action: 'fetchExternal',
+    url: `https://www.pealim.com/search/?q=${encodeURIComponent(word)}`
+  });
+  if (!resp || !resp.success) throw new Error((resp && resp.error) || 'Pealim request failed');
+  const doc = new DOMParser().parseFromString(resp.html, 'text/html');
+  const clean = el => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
+  const entries = [];
+  doc.querySelectorAll('.verb-search-data').forEach(entry => {
+    const meaning = clean(entry.querySelector('.verb-search-meaning'));
+    if (!meaning) return;
+    const posText = clean(entry.querySelector('.verb-search-binyan')).replace(/^Part of speech:\s*/i, '');
+    const pos = posText.split(/\s[–-]\s|,/)[0].trim();
+    const item = pos ? `${meaning} (${pos})` : meaning;
+    if (!entries.includes(item)) entries.push(item);
+  });
+  if (!entries.length) {
+    // Fall back to any form-level meanings on the page
+    doc.querySelectorAll('.vf-search-meaning').forEach(el => {
+      const m = clean(el);
+      if (m && !entries.includes(m)) entries.push(m);
+    });
+  }
+  if (!entries.length) throw new Error('No results found on Pealim');
+  return entries.slice(0, 3).join('; ');
+}
+
+/**
+ * Handle dictionary lookup dropdown: fills the field with the meaning of each
+ * unknown word from Reverso / Pealim / Google Translate (no AI involved).
+ * @param {'reverso'|'pealim'|'google'} source
+ * @param {HTMLSelectElement} select - The dropdown that triggered the lookup
+ * @param {Function} getWordsCallback - Callback to get word lists
+ */
+async function handleDictionaryLookup(source, select, getWordsCallback) {
+  const textarea = document.getElementById(select.dataset.fieldId);
+  if (!textarea) return;
+
+  const sourceText = getSourceText();
+  if (!sourceText) return;
+
+  const placeholder = select.options[0];
+  const originalLabel = placeholder.textContent;
+  select.disabled = true;
+  placeholder.textContent = 'Looking up…';
+
+  try {
+    const { matureWords, learningWords } = await getWordsCallback();
+    const unknownWords = extractAllUnknownWords(sourceText, matureWords, learningWords).slice(0, 5);
+
+    if (unknownWords.length === 0) {
+      alert('No unknown words found in sentence');
+      return;
+    }
+
+    const lines = [];
+    const failed = [];
+    let lastError = '';
+    for (const word of unknownWords) {
+      try {
+        const meaning = await fetchDictionaryMeaning(source, word);
+        lines.push(unknownWords.length > 1 ? `${word}: ${meaning}` : meaning);
+      } catch (error) {
+        failed.push(word);
+        lastError = error.message;
+      }
+    }
+
+    if (lines.length === 0) {
+      alert(`Lookup failed: ${lastError || 'no result'}`);
+      return;
+    }
+
+    const existing = textarea.value.trim();
+    const additions = lines.filter(line => !existing.includes(line));
+    if (additions.length) {
+      textarea.value = existing ? existing + '\n' + additions.join('\n') : additions.join('\n');
+    }
+    if (failed.length) {
+      alert(`No result for: ${failed.join(', ')}`);
+    }
+  } catch (error) {
+    console.error('Dictionary lookup error:', error);
+    alert('Dictionary lookup failed');
+  } finally {
+    select.disabled = false;
+    placeholder.textContent = originalLabel;
+    select.value = '';
+  }
+}
+
+/**
  * Handle define button click
  * @param {HTMLElement} button - Button that was clicked
  * @param {Function} getWordsCallback - Callback to get word lists
@@ -761,8 +871,9 @@ function createImagePickerField(field, fieldId) {
     background:#1a1a24;color:#ededf5;font-size:12px;cursor:pointer;outline:none;
   `;
   [
+    { value: 'pollinations', label: '🌸 Pollinations (free account — best quality)' },
     { value: 'cloudflare', label: '☁️ Cloudflare (free — Flux Schnell)' },
-    { value: 'gemini',     label: '✦ Gemini (paid — ~$0.05/image)' },
+    { value: 'gemini',     label: '✦ Gemini (paid — ~$0.03–0.05/image)' },
   ].forEach(({ value, label }) => {
     const opt = document.createElement('option');
     opt.value = value; opt.textContent = label;
@@ -783,8 +894,8 @@ function createImagePickerField(field, fieldId) {
     const prompt = promptTextarea.value.trim();
     if (!prompt) return;
     const provider = providerSelect.value;
-    const action = provider === 'gemini' ? 'generateGeminiImage' : 'generateCloudflareImage';
-    const providerName = provider === 'gemini' ? 'Gemini' : 'Cloudflare';
+    const action = { gemini: 'generateGeminiImage', pollinations: 'generatePollinationsImage' }[provider] || 'generateCloudflareImage';
+    const providerName = { gemini: 'Gemini', pollinations: 'Pollinations' }[provider] || 'Cloudflare';
     generateBtn.disabled = true;
     generateBtn.textContent = 'Generating…';
     generateStatus.style.color = '#8f8fa8';
@@ -940,6 +1051,14 @@ function attachAIButtonListeners(getWordsCallback) {
     button.addEventListener('click', () => handleDefine(button, getWordsCallback));
   });
 
+  const lookupSelects = ankiModal.querySelectorAll('.dict-lookup-select');
+  lookupSelects.forEach(select => {
+    select.addEventListener('change', () => {
+      const source = select.value;
+      if (source) handleDictionaryLookup(source, select, getWordsCallback);
+    });
+  });
+
   audioButtons.forEach(button => {
     button.addEventListener('click', () => handleGenerateAudio(button));
   });
@@ -1074,6 +1193,23 @@ async function loadModelFields(getWordsCallback) {
             defineBtn.style.cssText = aiButtonStyle;
             defineBtn.textContent = 'AI Define';
             buttonDiv.appendChild(defineBtn);
+
+            const lookupSelect = document.createElement('select');
+            lookupSelect.className = 'dict-lookup-select';
+            lookupSelect.setAttribute('data-field-id', `anki-field-${fieldId}`);
+            lookupSelect.title = 'Fill with a dictionary definition of the unknown word (no AI)';
+            lookupSelect.style.cssText = aiButtonStyle + 'color-scheme:dark;appearance:auto;';
+            [
+              { value: '', label: 'Look up ▾' },
+              { value: 'reverso', label: 'Reverso' },
+              { value: 'pealim', label: 'Pealim' },
+              { value: 'google', label: 'Google Translate' },
+            ].forEach(({ value, label }) => {
+              const opt = document.createElement('option');
+              opt.value = value; opt.textContent = label;
+              lookupSelect.appendChild(opt);
+            });
+            buttonDiv.appendChild(lookupSelect);
           }
 
           if (isAudioField) {
@@ -1091,24 +1227,6 @@ async function loadModelFields(getWordsCallback) {
 
         fieldsContainer.appendChild(fieldDiv);
       });
-
-      // Pre-fill image search inputs with unknown word(s) from the sentence
-      if (imagePickerInputs.length && currentSentence) {
-        let searchTerm = '';
-        try {
-          const { matureWords, learningWords } = await getWordsCallback();
-          const unknownWords = extractAllUnknownWords(currentSentence, matureWords, learningWords);
-          searchTerm = unknownWords.join(' ');
-        } catch (_) {}
-        // Fall back to first Hebrew word if word lists unavailable
-        if (!searchTerm) {
-          searchTerm = (currentSentence.match(/[֐-׿]+/g) || [])[0] || '';
-        }
-        if (searchTerm) {
-          imagePickerInputs.forEach(inp => { inp.value = searchTerm; });
-          imagePickerPrompts.forEach(ta => { ta.value = searchTerm; });
-        }
-      }
 
       if (response.fields.length > 0) {
         fillSentenceField();

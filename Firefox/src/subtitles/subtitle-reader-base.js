@@ -25,6 +25,8 @@
     this.sentenceColor = '#5a7fff';
     this.potentiallyI1Color = '#9b6bff';
     this.isEnabled = true;
+    this.readerEnabled = true; // User setting: show overlay + subtitle browser
+    this.subtitleShowBtn = null;
     this.audioContext = null;
     this.audioSourceNode = null;
     this.selectedSubIndex = null;
@@ -72,6 +74,91 @@
       console.log(`[${this.platformName} Subs] Strip nikud enabled:`, this.stripNikudEnabled);
     } catch (error) {
       console.error(`[${this.platformName} Subs] Error loading strip nikud setting:`, error);
+    }
+  }
+
+  /**
+   * Load the "Enable Subtitle Reader" setting
+   * @returns {Promise<boolean>} Whether the overlay + subtitle browser should be shown
+   */
+  async loadReaderEnabledSetting() {
+    try {
+      const result = await chrome.storage.local.get(['settings']);
+      this.readerEnabled = result.settings?.subtitleReaderEnabled !== false;
+    } catch (error) {
+      console.error(`[${this.platformName} Subs] Error loading subtitle reader setting:`, error);
+      this.readerEnabled = true;
+    }
+    return this.readerEnabled;
+  }
+
+  /**
+   * Resolve once the subtitle reader is enabled in settings.
+   * If it's disabled, waits for it to be switched on (popup/settings) so the
+   * reader can start live without a page reload.
+   * @returns {Promise<boolean>} true when enabled, false if the reader was cleaned up / page changed while waiting
+   */
+  async waitUntilReaderEnabled() {
+    if (await this.loadReaderEnabledSetting()) return true;
+
+    console.log(`[${this.platformName} Subs] Subtitle reader disabled in settings, waiting until enabled`);
+    const startUrl = location.href;
+
+    return new Promise(resolve => {
+      const finish = (result) => {
+        chrome.storage.onChanged.removeListener(listener);
+        this._readerWaitFinish = null;
+        resolve(result);
+      };
+      const listener = (changes, area) => {
+        if (area !== 'local' || !changes.settings) return;
+        if (this._destroyed || location.href !== startUrl) { finish(false); return; }
+        if (changes.settings.newValue?.subtitleReaderEnabled !== false) {
+          this.readerEnabled = true;
+          console.log(`[${this.platformName} Subs] Subtitle reader enabled, starting`);
+          finish(true);
+        }
+      };
+      this._readerWaitFinish = finish;
+      chrome.storage.onChanged.addListener(listener);
+    });
+  }
+
+  /**
+   * Show or hide all subtitle reader UI (overlay, translation overlay, browser, show button)
+   * Uses an !important stylesheet rule so other code setting style.display can't re-show it.
+   * @param {boolean} visible
+   */
+  setReaderVisible(visible) {
+    this.readerEnabled = visible;
+    const elements = [this.subtitleOverlay, this.translationOverlay, this.subtitleBrowser, this.subtitleShowBtn];
+
+    elements.forEach(el => {
+      if (!el) return;
+      const doc = el.ownerDocument;
+      if (doc && !doc.getElementById('ssh-reader-hidden-style')) {
+        const style = doc.createElement('style');
+        style.id = 'ssh-reader-hidden-style';
+        style.textContent = '[data-ssh-reader-hidden] { display: none !important; }';
+        (doc.head || doc.documentElement).appendChild(style);
+      }
+      if (visible) {
+        el.removeAttribute('data-ssh-reader-hidden');
+      } else {
+        el.setAttribute('data-ssh-reader-hidden', '');
+      }
+    });
+
+    if (this.subtitleBrowser) {
+      // Toggling style.display also lets platform observers restore/adjust the player layout
+      this.subtitleBrowser.style.display = visible ? 'block' : 'none';
+      if (this.subtitleShowBtn) this.subtitleShowBtn.style.display = 'none';
+    }
+
+    if (visible) {
+      // Force a refresh of the current subtitle
+      this.currentSubtitleIndex = -2;
+      this.updateCurrentSubtitle();
     }
   }
 
@@ -287,14 +374,35 @@
 
     // Title
     const title = document.createElement('div');
-    title.textContent = `${this.platformName} Hebrew Subtitles`;
     title.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 8px;
       font-size: 15px;
       font-weight: 700;
       margin-bottom: 12px;
       color: #ededf5;
       letter-spacing: -0.2px;
     `;
+    const titleText = document.createElement('span');
+    titleText.textContent = 'SelfStudyHebrew';
+    title.appendChild(titleText);
+
+    // Small platform tag next to the brand name
+    const platformTag = document.createElement('span');
+    platformTag.textContent = this.platformName;
+    platformTag.style.cssText = `
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      color: #9aa6ff;
+      background: rgba(90, 127, 255, 0.12);
+      border: 1px solid rgba(90, 127, 255, 0.35);
+      border-radius: 999px;
+      padding: 2px 8px;
+      line-height: 1.4;
+    `;
+    title.appendChild(platformTag);
     header.appendChild(title);
 
     // Comprehension stats
@@ -462,6 +570,8 @@
     } catch (e) {
       document.body.appendChild(showBtn);
     }
+
+    this.subtitleShowBtn = showBtn;
 
     // Toggle button - hide browser and show the show button
     toggleBtn.addEventListener('click', () => {
@@ -1181,17 +1291,26 @@
    * @param {string} languageCode - Language code to load
    */
   async initialize(languageCode = 'iw') {
+    if (!(await this.waitUntilReaderEnabled())) return;
+
     await this.loadStripNikudSetting();
 
-    chrome.runtime.onMessage.addListener(async (message, _sender, _sendResponse) => {
+    chrome.runtime.onMessage.addListener((message, _sender, _sendResponse) => {
       if (message.action === 'settingsUpdated') {
-        this.stripNikudEnabled = message.settings.stripNikudEnabled;
-        // Refresh displays
-        await this.populateSubtitleBrowser();
-        if (this.currentSubtitleIndex !== -1) {
-          this.updateCurrentSubtitle();
-        }
+        (async () => {
+          const readerEnabled = message.settings.subtitleReaderEnabled !== false;
+          if (readerEnabled !== this.readerEnabled) {
+            this.setReaderVisible(readerEnabled);
+          }
+          this.stripNikudEnabled = message.settings.stripNikudEnabled;
+          // Refresh displays
+          await this.populateSubtitleBrowser();
+          if (this.currentSubtitleIndex !== -1) {
+            this.updateCurrentSubtitle();
+          }
+        })();
       }
+      return false;
     });
 
     document.addEventListener('ankiWordsRefreshed', async () => {
@@ -1229,7 +1348,7 @@
         }
 
         this.currentVideo.addEventListener('timeupdate', () => {
-          if (this.isEnabled) {
+          if (this.isEnabled && this.readerEnabled) {
             this.updateCurrentSubtitle();
           }
         });
@@ -1407,6 +1526,8 @@
    * Cleanup resources
    */
   cleanup() {
+    this._destroyed = true;
+    if (this._readerWaitFinish) this._readerWaitFinish(false);
     if (this.subtitleOverlay) {
       this.subtitleOverlay.remove();
       this.subtitleOverlay = null;
@@ -1418,6 +1539,10 @@
     if (this.subtitleBrowser) {
       this.subtitleBrowser.remove();
       this.subtitleBrowser = null;
+    }
+    if (this.subtitleShowBtn) {
+      this.subtitleShowBtn.remove();
+      this.subtitleShowBtn = null;
     }
     this.subtitles = [];
     this.currentSubtitleIndex = -1;
